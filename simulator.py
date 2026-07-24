@@ -22,7 +22,7 @@ from pymodbus.client.sync import ModbusTcpClient
 _PROG_FILE_PATTERN = re.compile(r"value='([^']+)'\s+id='prog_file'")
 
 OPENPLC_DIR = Path(f"C:/msys64/home/{os.environ.get('USERNAME', '')}/OpenPLC_v3")
-WEB_BASE = "http://localhost:8080"
+WEB_BASE = os.environ.get("OPENPLC_WEB_BASE", "http://localhost:8080").rstrip("/")
 MODBUS_HOST = "127.0.0.1"
 MODBUS_PORT = 502
 WEB_USERNAME = "openplc"

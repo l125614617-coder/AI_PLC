@@ -111,18 +111,26 @@ C:\msys64\usr\bin\bash.exe -lc "cd ~/OpenPLC_v3/webserver && ~/OpenPLC_v3/.venv/
 
 這會佔用終端機前景執行，建議另開一個視窗，或用 `nohup ... &` 丟到背景。OpenPLC 網頁介面的預設帳密是 `openplc` / `openplc`（`simulator.py` 裡寫死這組帳密去自動登入，如果你在 OpenPLC 的 `users` 頁面改過密碼，記得同步更新 `simulator.py` 的 `WEB_PASSWORD`）。
 
-兩個服務都要跑：Ollama（11434）、OpenPLC webserver（8080 + Modbus 502）、Streamlit（8501）。
+三個服務都要跑：Ollama（11434）、OpenPLC webserver（預設 8080 + Modbus 502）、Streamlit（8501）。
 
 ## 5. Port 一覽表
+
+OpenPLC Web UI 預設使用 `8080`。若該連接埠已被其他服務占用，可在啟動
+PLC-Assist 前設定 `OPENPLC_WEB_BASE`，例如：
+
+```powershell
+$env:OPENPLC_WEB_BASE = "http://localhost:8081"
+C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_openplc.sh"
+```
 
 | Port | 服務 | 說明 |
 |---|---|---|
 | 8501 | Streamlit | 主要操作介面 |
 | 11434 | Ollama | LLM 推論 API |
-| 8080 | OpenPLC webserver | 部署程式、觸發編譯用的 HTTP 介面 |
+| 8080（可設定） | OpenPLC webserver | 部署程式、觸發編譯用的 HTTP 介面 |
 | 502 | OpenPLC Modbus TCP | 模擬情境測試讀寫用 |
 
-全部都只監聽 `localhost`，不會對外開放。
+開發服務的實際監聽介面由各服務設定決定；若機器位於共用網路，請用防火牆限制存取。
 
 ## 6. 已知限制與維運注意事項
 

@@ -2,5 +2,8 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+pytest-cache-files-*/
 *.log
 .claude/
+.runlogs/
+JidienSyncServer_Release_V1.02.00/

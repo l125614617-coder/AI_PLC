@@ -123,7 +123,17 @@ DEFAULT_SYSTEM_PROMPT = (
     "   Pwr(Enable := bEnable, Axis := Axis1);\n"
     "   Jogger(Execute := bEnable, Velocity := rJogVel, Acceleration := 200.0, Axis := Axis1);\n"
     "   bInVelocity := Axis1.InVelocity;\n"
-    "   END_PROGRAM\n"
+    "   END_PROGRAM\n\n"
+    "7. 輸出 CODE 前逐項自我檢查：\n"
+    "   - 最後一行必須是 END_PROGRAM；所有在程式本體使用的變數都必須先在 VAR 區塊宣告。\n"
+    "   - MC_Power 必須每個掃描週期呼叫一次，正常寫法是 Pwr(Enable := bEnable, Axis := Axis1)，"
+    "不可以只在急停條件內呼叫，也不可以把 Enable 固定為 FALSE。\n"
+    "   - UI 給定的速度/位置必須實際寫入程式（可用變數初值，例如 rJogVel : REAL := 1500.0），"
+    "不可以只宣告一個未初始化變數。\n"
+    "   - 若需求提到急停或極限限制，代表使用內建 MC_* 函式方塊的保護即可；"
+    "CODE 仍然禁止直接提到 EStopActive、LimitPos、LimitNeg、HomeSwitch。\n"
+    "   - Reset 只能由一般的 bResetReq 輸入驅動：Rst(Execute := bResetReq, Axis := Axis1)。"
+    "不可以自行把 bResetReq 持續設成 TRUE，也不可以根據安全硬體欄位反向產生 Reset。\n"
 )
 
 
@@ -136,7 +146,9 @@ def build_user_prompt(ui_data: dict) -> str:
         f"- 目標速度: {ui_data['requested_velocity']} rpm\n"
         f"- 目標位置: {ui_data['requested_position']} mm\n"
         f"- 方向: {ui_data['requested_direction']}\n"
-        "請確保有處理極限限制與復歸 (Reset) 的邏輯。"
+        "極限與緊急停止由系統提供的 MC_* 函式方塊內建處理；CODE 不得直接讀寫 "
+        "EStopActive、LimitPos、LimitNeg、HomeSwitch。請另外宣告一般輸入 "
+        "bResetReq，並用 MC_Reset(Execute := bResetReq, Axis := Axis1) 提供人工復歸。"
     )
 
 

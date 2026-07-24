@@ -158,11 +158,26 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
         reserved.add(pou.upper())
     used = {}
     for i, raw in enumerate(body.splitlines(), 1):
+        # AXIS_REF/FB member names (Axis1.Busy) and named call parameters
+        # (Enable := ...) are not standalone variables.
+        member_or_param = {
+            match.group(1).upper()
+            for match in re.finditer(
+                r"(?:\(|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s*:=",
+                raw,
+            )
+        }
+        member_or_param.update(
+            match.group(1).upper()
+            for match in re.finditer(r"\.\s*([A-Za-z_][A-Za-z0-9_]*)", raw)
+        )
         for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", raw):
             up = tok.upper()
             if up in reserved:
                 continue
             if up in declared:
+                continue
+            if up in member_or_param:
                 continue
             if re.fullmatch(r"T#.*", tok, re.IGNORECASE):
                 continue
@@ -210,7 +225,7 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
         if low.endswith(_control_end):
             continue
         # 純關鍵字 / 區塊標記行
-        first = re.split(r"[\s(]", low, 1)[0]
+        first = re.split(r"[\s(]", low, maxsplit=1)[0]
         if first in _skip_kw or _VAR_OPENER.match(line) or _END_VAR.match(line):
             continue
         if line.endswith(":") or re.match(r"^[\w,\s]+:$", line):  # CASE 標籤
@@ -229,6 +244,20 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
     # ---- 7. 馬達 / 運動控制安全語意 (info) ----
     if category == "motor_control":
         up = code.upper()
+        forbidden_axis_inputs = re.findall(
+            r"\.\s*(ESTOPACTIVE|LIMITPOS|LIMITNEG|HOMESWITCH)\b",
+            clean,
+            re.IGNORECASE,
+        )
+        for field in sorted(set(name.upper() for name in forbidden_axis_inputs)):
+            issues.append({
+                "code": "E063",
+                "message": (
+                    f"不可在生成程式直接讀寫 AXIS_REF.{field}；"
+                    "此安全輸入由外部介面與 MC_* 函式方塊處理。"
+                ),
+                "severity": "error",
+            })
         if not re.search(r"E[_]?STOP|EMERGENCY|ESTOP", up):
             issues.append({
                 "code": "I060",

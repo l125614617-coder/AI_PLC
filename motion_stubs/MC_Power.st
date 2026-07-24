@@ -12,6 +12,10 @@ END_VAR
 
 IF Axis.EStopActive THEN
     Axis.Enabled := FALSE;
+    Axis.Busy := FALSE;
+    Axis.Error := TRUE;
+    Axis.ErrorID := 1;
+    Axis.AxisState := 6;
 ELSIF Enable AND Axis.AxisState <> 6 THEN
     Axis.Enabled := TRUE;
 ELSE

@@ -65,6 +65,13 @@ C:\msys64\usr\bin\bash.exe -lc "cd ~/OpenPLC_v3/webserver && ~/OpenPLC_v3/.venv/
 
 這個會佔住終端機，開一個新視窗跑或丟到背景執行都行。OpenPLC 網頁介面預設帳密是 `openplc` / `openplc`（寫死在 `simulator.py` 裡，改密碼記得同步改那邊）。
 
+如果 8080 已被其他軟體占用，可改用 8081：
+
+```powershell
+$env:OPENPLC_WEB_BASE = "http://localhost:8081"
+C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_openplc.sh"
+```
+
 如果自動腳本跑失敗，或想知道每一步實際在做什麼，`DEPLOYMENT.md` 裡有更完整的說明跟疑難排解。
 
 ## 專案裡有什麼
