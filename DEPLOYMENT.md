@@ -94,12 +94,24 @@ cd D:\AI_PLC
 
 ### 4.1 只跑基本生成功能（不需要工具鏈）
 
+Ollama 本地版：
+
 ```powershell
 cd D:\AI_PLC
 .\venv\Scripts\python.exe -m streamlit run app.py
 ```
 
 瀏覽器開啟 `http://localhost:8501`。
+
+Codex 推理版（需要先完成 `codex login`）：
+
+```powershell
+cd D:\AI_PLC
+.\venv\Scripts\python.exe -m streamlit run app_codex.py --server.port 8502
+```
+
+瀏覽器開啟 `http://localhost:8502`。Codex 版使用唯讀、ephemeral 工作階段，
+預設模型為 `gpt-5.6-sol`；可用 `PLC_ASSIST_CODEX_MODEL` 覆寫。
 
 ### 4.2 完整功能（含 Compile + Simulate）
 
@@ -126,6 +138,7 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 | Port | 服務 | 說明 |
 |---|---|---|
 | 8501 | Streamlit | 主要操作介面 |
+| 8502 | Streamlit | Codex 推理版操作介面 |
 | 11434 | Ollama | LLM 推論 API |
 | 8080（可設定） | OpenPLC webserver | 部署程式、觸發編譯用的 HTTP 介面 |
 | 502 | OpenPLC Modbus TCP | 模擬情境測試讀寫用 |
@@ -166,6 +179,8 @@ taskkill /F /IM openplc.exe
 ```
 D:\AI_PLC\
 ├── app.py                  # Streamlit UI + system prompt + 生成/驗證/模擬的串接邏輯
+├── app_codex.py             # Codex 推理版 Streamlit 入口
+├── codex_provider.py         # Codex CLI JSONL 事件與生成後端
 ├── validator.py             # Stage 1：規則式靜態驗證（零依賴）
 ├── compiler.py               # Stage 2：真實 matiec 編譯檢查 + 軸介面自動注入
 ├── simulator.py               # Stage 3-5：部署到 OpenPLC + Modbus 情境測試

@@ -1,5 +1,7 @@
-import streamlit as st
+import os
 import re
+
+import streamlit as st
 from ollama import Client
 
 # 匯入輕量本地驗證引擎
@@ -21,10 +23,13 @@ except Exception as _e:  # 例如缺少 pymodbus/requests，或路徑尚未設�
 def get_ollama_client():
     return Client(host="http://localhost:11434")
 
-client = get_ollama_client()
-MODEL_NAME = "qwen3.5:9b"
+PROVIDER = os.environ.get("PLC_ASSIST_PROVIDER", "ollama").lower()
+IS_CODEX = PROVIDER == "codex"
+client = None if IS_CODEX else get_ollama_client()
+MODEL_NAME = "gpt-5.6-sol" if IS_CODEX else "qwen3.5:9b"
 
-st.set_page_config(page_title="PLC-Assist 結構化文字生成器", layout="wide")
+edition_name = "Codex 推理版" if IS_CODEX else "Ollama 本地版"
+st.set_page_config(page_title=f"PLC-Assist {edition_name}", layout="wide")
 
 # ==========================================
 # 2. 預設 Prompt (System / User 分離)
@@ -184,6 +189,32 @@ def ask_ai_plc_assistant(system_prompt: str, user_prompt: str, think: bool = Tru
     """以 streaming 方式呼叫模型；think_area / answer_area 為 Streamlit placeholder，
     可即時把思考與答案逐字顯示給使用者。回傳解析與驗證後的結果字典。"""
     try:
+        if IS_CODEX:
+            from codex_provider import generate_with_codex
+
+            def update_progress(text: str) -> None:
+                if think_area is not None:
+                    think_area.markdown(text)
+                if answer_area is not None:
+                    answer_area.markdown("✍️ Codex 正在產生最終 ST 答案...")
+
+            response = generate_with_codex(
+                system_prompt,
+                user_prompt,
+                on_progress=update_progress if think else None,
+            )
+            parsed = _parse_response(response["raw_text"])
+            parsed["thinking"] = response["thinking"] if think else ""
+            parsed["think_requested"] = think
+            parsed["model"] = response["model"]
+            parsed["usage"] = response["usage"]
+            parsed["validation"] = validate_st_code(
+                parsed["code"],
+                "Motion control with safety interlocks.",
+                "motor_control",
+            )
+            return parsed
+
         stream = client.chat(
             model=MODEL_NAME,
             think=think,  # 開啟思考模式，思考增量會出現在 chunk.message.thinking
@@ -304,7 +335,8 @@ def run_compile_and_simulate(code: str) -> dict:
 # ==========================================
 # 5. 前端 UI 介面層
 # ==========================================
-st.title("⚙️ Generate Structured Text (PLC-Assist 專業版)")
+st.title(f"⚙️ Generate Structured Text (PLC-Assist {edition_name})")
+st.caption(f"模型來源：{MODEL_NAME}｜{'Codex CLI（唯讀暫時工作階段）' if IS_CODEX else '本機 Ollama'}")
 st.markdown("---")
 
 col1, col2 = st.columns([4, 6])
@@ -352,11 +384,15 @@ with col1:
     st.markdown("---")
     is_generating = st.session_state.get("generating", False)
     show_thinking = st.checkbox(
-        "🧠 顯示思考過程 (Chain-of-Thought)",
-        value=False,
-        help="關閉 (預設)：快速模式，不顯示思考——實測對這組規範較多的 system prompt 更穩定。"
-             "開啟：顯示模型推理過程，但這個模型在規則較複雜時容易陷入反覆推敲、"
-             "甚至耗盡整個 token 預算導致完全沒有輸出程式碼，開啟前請留意。",
+        "🧠 顯示 Codex 推理摘要與進度" if IS_CODEX else "🧠 顯示思考過程 (Chain-of-Thought)",
+        value=IS_CODEX,
+        help=(
+            "顯示 Codex 提供的安全推理摘要、工作階段進度與 token 使用量；"
+            "不顯示模型私有的逐字思考鏈。"
+            if IS_CODEX else
+            "關閉 (預設)：快速模式，不顯示思考。開啟後會顯示本機模型回傳的 thinking 欄位，"
+            "但可能增加延遲並消耗較多 token。"
+        ),
         disabled=is_generating,
     )
     # 生成中鎖定按鈕，避免重複提交
@@ -375,11 +411,13 @@ with col2:
         think_area = None
         answer_area = None
         if show_thinking:
-            st.markdown("### 🧠 模型思考過程 (即時串流)")
+            st.markdown("### 🧠 Codex 推理摘要與進度" if IS_CODEX else "### 🧠 模型思考過程 (即時串流)")
             think_area = st.empty()
         answer_area = st.empty()
 
-        spinner_msg = "模型思考中..." if show_thinking else "快速生成 ST Code..."
+        spinner_msg = "Codex 正在推理並生成 ST Code..." if IS_CODEX else (
+            "模型思考中..." if show_thinking else "快速生成 ST Code..."
+        )
         with st.spinner(spinner_msg):
             st.session_state["plc_data"] = ask_ai_plc_assistant(
                 st.session_state.get("system_prompt", DEFAULT_SYSTEM_PROMPT),
@@ -398,11 +436,16 @@ with col2:
         if "error" in plc_data:
             st.error(f"Generation Failed: {plc_data['error']}")
         else:
-            # --- 0. 模型思考過程 (Chain-of-Thought) ---
+            # --- 0. 模型推理摘要 / 本機 thinking ---
             thinking = plc_data.get("thinking", "")
             if thinking:
-                with st.expander("🧠 模型思考過程 (Chain-of-Thought)", expanded=True):
+                with st.expander(
+                    "🧠 Codex 推理摘要與進度" if IS_CODEX else "🧠 模型思考過程 (Chain-of-Thought)",
+                    expanded=True,
+                ):
                     st.markdown(thinking)
+                    if IS_CODEX and plc_data.get("usage"):
+                        st.json(plc_data["usage"])
                 st.markdown("---")
             elif plc_data.get("think_requested"):
                 st.info("ℹ️ 已開啟思考模式，但本次未取得思考內容（模型可能直接輸出答案）。")

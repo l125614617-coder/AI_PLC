@@ -5,7 +5,8 @@
 ## 目前狀態
 
 - 專案位置：`D:\AI_PLC`
-- PLC-Assist 網址：`http://localhost:8501`
+- PLC-Assist Ollama 本地版：`http://localhost:8501`
+- PLC-Assist Codex 推理版：`http://localhost:8502`
 - Ollama API：`http://localhost:11434`
 - OpenPLC webserver：`http://localhost:8081`（8080 被既有的 `ApplicationWebServer` 占用）
 - Ollama 模型 `qwen3.5:9b` 已安裝。
@@ -72,6 +73,18 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
 - 因 8080 已被其他程式使用，`simulator.py` 現在支援 `OPENPLC_WEB_BASE`；
   新增 `setup/run_openplc.py` 與 `setup/start_openplc.sh`，可在不修改 OpenPLC 安裝檔的情況下改用 8081。
 
+### Codex 第二版
+
+- 新增 `app_codex.py` 獨立網頁入口，與 Ollama 版可同時運行。
+- 新增 `codex_provider.py`，沿用電腦現有的 Codex CLI 登入。
+- Codex 工作階段固定使用 `--ephemeral --ignore-user-config --sandbox read-only`，
+  不允許生成流程修改專案。
+- 預設模型為 `gpt-5.6-sol`，可用 `PLC_ASSIST_CODEX_MODEL` 覆寫。
+- UI 顯示 Codex 推理摘要、進度事件與 token usage，不顯示私有逐字思考鏈。
+- 真實 GPT-5.6 Sol JOG 生成已通過 validator 與 matiec 編譯。
+- Codex Streamlit UI render smoke test及按鈕觸發真實生成的端到端測試均通過。
+- pytest 現為 `14 passed`。
+
 ## 啟動方式
 
 PLC-Assist：
@@ -79,6 +92,12 @@ PLC-Assist：
 ```powershell
 cd D:\AI_PLC
 .\venv\Scripts\python.exe -m streamlit run app.py
+```
+
+PLC-Assist Codex 推理版：
+
+```powershell
+.\venv\Scripts\python.exe -m streamlit run app_codex.py --server.port 8502
 ```
 
 OpenPLC：

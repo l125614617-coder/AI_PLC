@@ -1,6 +1,15 @@
 # PLC-Assist
 
-用本機 LLM（Ollama + qwen3.5:9b）生成 IEC 61131-3 結構化文字 (ST) 程式碼的小工具，目標是做運動控制相關的邏輯（JOG、絕對位置移動、緊急停止、復歸這些）。
+使用 LLM 生成 IEC 61131-3 結構化文字 (ST) 程式碼的小工具，目標是做運動控制相關的邏輯（JOG、絕對位置移動、緊急停止、復歸這些）。
+
+| 版本 | 網址 | 模型來源 |
+|---|---|---|
+| Ollama 本地版 | `http://localhost:8501` | 本機 `qwen3.5:9b` |
+| Codex 推理版 | `http://localhost:8502` | 已登入的 Codex CLI，預設 `gpt-5.6-sol` |
+
+Codex 版顯示安全的推理摘要、進度與 token 使用量，不顯示或偽造模型的私有
+逐字思考鏈。兩版共用相同的 ST validator、matiec 編譯器及 OpenPLC/Modbus
+情境測試。
 
 會做這個東西是因為每次要手寫一段基本的運動控制 ST 都要重新想一次安全互鎖邏輯，很煩，乾脆讓 LLM 先出草稿，人再看過修。但 LLM 生成的程式碼不能照單全收——所以這個專案真正花時間的地方其實不是「生成」，是後面那三層驗證，確保吐出來的東西至少「編得過」、而且「行為合理」，不是每次都靠肉眼抓 bug。
 
@@ -36,6 +45,16 @@ ollama pull qwen3.5:9b
 ```
 
 開 `http://localhost:8501` 就能用了。
+
+Codex 第二版需要先確認 Codex CLI 已登入：
+
+```powershell
+codex login
+.\venv\Scripts\python.exe -m streamlit run app_codex.py --server.port 8502
+```
+
+開 `http://localhost:8502`。若要更換 Codex 模型，可在啟動前設定
+`PLC_ASSIST_CODEX_MODEL`；預設為 `gpt-5.6-sol`。
 
 ## 裝 OpenPLC（完整功能要用到）
 
@@ -77,6 +96,8 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 ## 專案裡有什麼
 
 - `app.py` — 整個 Streamlit 介面，包含餵給 LLM 的 system prompt（這份 prompt 其實改了很多輪，踩過不少雷，細節寫在 `DEPLOYMENT.md`）
+- `app_codex.py` — Codex 推理版的獨立 Streamlit 入口
+- `codex_provider.py` — 以唯讀、暫時 Codex CLI 工作階段生成 ST
 - `validator.py` — 純規則式的靜態檢查，沒有外部依賴，永遠能跑
 - `compiler.py` / `simulator.py` / `scenarios.py` — 真正編譯 + 模擬部署那條 pipeline
 - `motion_stubs/` — 手寫的運動控制函式方塊模擬庫（`MC_Power`、`MC_MoveAbsolute` 之類），LLM 生成的程式碼是接這一套跑的，不是自己重新發明安全邏輯
