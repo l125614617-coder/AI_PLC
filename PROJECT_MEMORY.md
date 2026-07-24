@@ -91,6 +91,15 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
 - 新增 `E064`，可在 matiec 前攔截 `AXIS_REF.ErrorID : DINT` 被指定給 `DWORD` 的錯誤。
 - pytest 現為 `17 passed`。
 
+### bEnable 初值造成 Runtime 0/2
+
+- Codex 生成 `bEnable : BOOL := FALSE;` 時，舊版 adapter 的 regex 只辨識
+  `bEnable : BOOL;`，所以雖然 matiec 通過，Modbus `start` coil 並未橋接到程式。
+- `_BENABLE_PATTERN` 已支援含初值的 BOOL 宣告。
+- 已加入 compiler 回歸測試，pytest 現為 `18 passed`。
+- 已用使用者回報的完整 JOG 程式重新部署 OpenPLC：
+  `enable_responds` 與 `estop_cuts_power` 均通過（2/2）。
+
 ## 啟動方式
 
 PLC-Assist：

@@ -67,7 +67,10 @@ AXIS_ADAPTER_IO_MAP = {
 }
 
 _AXIS_VAR_PATTERN = re.compile(r"(\w+)\s*:\s*AXIS_REF\s*;", re.IGNORECASE)
-_BENABLE_PATTERN = re.compile(r"\bbEnable\s*:\s*BOOL\s*;", re.IGNORECASE)
+_BENABLE_PATTERN = re.compile(
+    r"\bbEnable\s*:\s*BOOL(?:\s*:=\s*[^;]+)?\s*;",
+    re.IGNORECASE,
+)
 _PROGRAM_MAIN_HEADER = re.compile(r"\bPROGRAM\s+MAIN\b", re.IGNORECASE)
 _END_VAR_PATTERN = re.compile(r"\bEND_VAR\b", re.IGNORECASE)
 _END_PROGRAM_PATTERN = re.compile(r"\bEND_PROGRAM\b", re.IGNORECASE)

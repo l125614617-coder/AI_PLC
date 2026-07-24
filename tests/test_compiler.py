@@ -100,6 +100,27 @@ END_PROGRAM
     assert "bEnable := AdpStart;" in result["full_source"]
 
 
+def test_initialized_benable_is_still_bridged_to_modbus_start():
+    """LLMs commonly initialize BOOL inputs explicitly. The adapter must still
+    recognize bEnable and override its initial value from the Modbus start coil
+    every scan."""
+    code = """
+PROGRAM MAIN
+VAR
+    Axis1  : AXIS_REF;
+    Pwr    : MC_Power;
+    bEnable: BOOL := FALSE;
+END_VAR
+Pwr(Enable := bEnable, Axis := Axis1);
+END_PROGRAM
+"""
+    result = compile_st_code(code)
+
+    assert result["status"] == "compiled"
+    assert result["axis_io_map"]["start"] == AXIS_ADAPTER_IO_MAP["start"]
+    assert "bEnable := AdpStart;" in result["full_source"]
+
+
 def test_chinese_comments_dont_cause_cascading_bogus_errors():
     """Discovered live: this matiec build's error recovery gets badly confused
     by non-ASCII (Chinese) text inside comments -- a genuinely broken program
