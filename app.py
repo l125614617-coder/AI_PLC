@@ -80,7 +80,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "   所有函式方塊的 Axis 參數都是 VAR_IN_OUT，呼叫時傳入同一個 AXIS_REF 變數 (例如 Axis := Axis1)，"
     "讓多個函式方塊共享同一顆虛擬軸的狀態。\n\n"
     "   AXIS_REF 內部有這些你可以『讀取』來判斷狀態的欄位 (不要直接寫入，狀態由函式方塊自己維護)：\n"
-    "   Position, Velocity, Busy, Done, Active, Error, ErrorID, Enabled, Homed, InVelocity (皆為唯讀狀態)。\n\n"
+    "   Position: REAL, Velocity: REAL, Busy: BOOL, Done: BOOL, Active: BOOL, Error: BOOL, "
+    "ErrorID: DINT, Enabled: BOOL, Homed: BOOL, InVelocity: BOOL (皆為唯讀狀態)。\n"
+    "   接收這些欄位的變數必須使用完全相同的型別；尤其 ErrorID 是 DINT，不是 DWORD。\n\n"
     "   AXIS_REF 另外還有 EStopActive、LimitPos、LimitNeg、HomeSwitch 這四個欄位——這些是由外部安全硬體/"
     "測試工具『自動寫入』的輸入訊號，不是你要自己判斷、賦值或提供邏輯的東西。你的程式碼『完全不需要』提到、"
     "讀取或寫入這四個欄位，也不要自己宣告 bEStop、bLimitSwitch 這類變數來模擬它們——每個函式方塊內部已經會"
@@ -192,22 +194,78 @@ def ask_ai_plc_assistant(system_prompt: str, user_prompt: str, think: bool = Tru
         if IS_CODEX:
             from codex_provider import generate_with_codex
 
-            def update_progress(text: str) -> None:
+            def update_progress(text: str, attempt: int = 1) -> None:
                 if think_area is not None:
-                    think_area.markdown(text)
+                    prefix = (
+                        "### 初次生成\n\n"
+                        if attempt == 1 else
+                        f"### 編譯修復第 {attempt - 1} 輪\n\n"
+                    )
+                    think_area.markdown(prefix + text)
                 if answer_area is not None:
-                    answer_area.markdown("✍️ Codex 正在產生最終 ST 答案...")
+                    answer_area.markdown(
+                        "✍️ Codex 正在產生最終 ST 答案..."
+                        if attempt == 1 else
+                        f"🔧 Codex 正在依 matiec 錯誤進行第 {attempt - 1} 輪修復..."
+                    )
 
             response = generate_with_codex(
                 system_prompt,
                 user_prompt,
-                on_progress=update_progress if think else None,
+                on_progress=(lambda text: update_progress(text, 1)) if think else None,
             )
+            responses = [response]
             parsed = _parse_response(response["raw_text"])
-            parsed["thinking"] = response["thinking"] if think else ""
+            compile_result = None
+            max_repairs = int(os.environ.get("PLC_ASSIST_CODEX_MAX_REPAIRS", "2"))
+
+            if not _SIMULATION_IMPORT_ERROR:
+                for repair_index in range(1, max_repairs + 1):
+                    compile_result = compile_st_code(parsed["code"])
+                    if compile_result["status"] == "compiled":
+                        break
+
+                    issue_text = "\n".join(
+                        f"- Line {issue.get('line')}: {issue.get('message')}"
+                        for issue in compile_result.get("issues", [])
+                    ) or f"- compiler status: {compile_result['status']}"
+                    repair_prompt = (
+                        f"{user_prompt}\n\n"
+                        "上一版答案未通過本系統實際使用的 matiec 編譯器。"
+                        "請依下列真實編譯錯誤修正，保留原始需求，重新輸出完整四區塊；"
+                        "不要只輸出 diff，也不要解釋修復過程。\n\n"
+                        f"<compiler_errors>\n{issue_text}\n</compiler_errors>\n\n"
+                        f"<previous_answer>\n{response['raw_text']}\n</previous_answer>"
+                    )
+                    attempt = repair_index + 1
+                    response = generate_with_codex(
+                        system_prompt,
+                        repair_prompt,
+                        on_progress=(
+                            lambda text, n=attempt: update_progress(text, n)
+                        ) if think else None,
+                    )
+                    responses.append(response)
+                    parsed = _parse_response(response["raw_text"])
+
+                if compile_result is None or compile_result["status"] != "compiled":
+                    compile_result = compile_st_code(parsed["code"])
+
+            total_usage = {}
+            for item in responses:
+                for key, value in item.get("usage", {}).items():
+                    if isinstance(value, int):
+                        total_usage[key] = total_usage.get(key, 0) + value
+
+            parsed["thinking"] = (
+                "\n\n---\n\n".join(item["thinking"] for item in responses)
+                if think else ""
+            )
             parsed["think_requested"] = think
             parsed["model"] = response["model"]
-            parsed["usage"] = response["usage"]
+            parsed["usage"] = total_usage
+            parsed["generation_attempts"] = len(responses)
+            parsed["auto_compile"] = compile_result
             parsed["validation"] = validate_st_code(
                 parsed["code"],
                 "Motion control with safety interlocks.",
@@ -450,6 +508,20 @@ with col2:
             elif plc_data.get("think_requested"):
                 st.info("ℹ️ 已開啟思考模式，但本次未取得思考內容（模型可能直接輸出答案）。")
                 st.markdown("---")
+
+            if IS_CODEX and plc_data.get("auto_compile"):
+                auto_compile = plc_data["auto_compile"]
+                attempts = plc_data.get("generation_attempts", 1)
+                if auto_compile.get("status") == "compiled":
+                    st.success(
+                        f"✅ Codex 輸出已在回傳前通過 matiec 真實編譯"
+                        f"（共 {attempts} 次生成嘗試）。"
+                    )
+                else:
+                    st.error(
+                        f"Codex 已自動修復 {max(0, attempts - 1)} 輪，"
+                        "但輸出仍未通過 matiec；請查看下方 Compile Issues。"
+                    )
 
             validation = plc_data.get("validation", {})
             score = validation.get("score", 0)

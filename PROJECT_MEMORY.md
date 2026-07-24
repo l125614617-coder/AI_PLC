@@ -83,7 +83,13 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
 - UI 顯示 Codex 推理摘要、進度事件與 token usage，不顯示私有逐字思考鏈。
 - 真實 GPT-5.6 Sol JOG 生成已通過 validator 與 matiec 編譯。
 - Codex Streamlit UI render smoke test及按鈕觸發真實生成的端到端測試均通過。
-- pytest 現為 `14 passed`。
+- Codex 生成現在會自動執行 matiec；失敗時把真實 compiler issues 交回 Codex，
+  最多自動修復兩輪，再把結果顯示給使用者。
+- 修正多行 FB 呼叫中 `Execute :=`、`Velocity :=` 等具名參數被誤判為未宣告變數，
+  以及最後一個具名參數被誤判為缺分號的問題。
+- 移除與「安全由 MC_* 內建」政策矛盾的 E-Stop/Limit 缺失提示。
+- 新增 `E064`，可在 matiec 前攔截 `AXIS_REF.ErrorID : DINT` 被指定給 `DWORD` 的錯誤。
+- pytest 現為 `17 passed`。
 
 ## 啟動方式
 

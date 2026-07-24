@@ -111,7 +111,9 @@ cd D:\AI_PLC
 ```
 
 瀏覽器開啟 `http://localhost:8502`。Codex 版使用唯讀、ephemeral 工作階段，
-預設模型為 `gpt-5.6-sol`；可用 `PLC_ASSIST_CODEX_MODEL` 覆寫。
+預設模型為 `gpt-5.6-sol`；可用 `PLC_ASSIST_CODEX_MODEL` 覆寫。生成後會先
+自動通過 matiec 編譯閘門，失敗時預設自動修復兩輪；可用
+`PLC_ASSIST_CODEX_MAX_REPAIRS` 調整次數。
 
 ### 4.2 完整功能（含 Compile + Simulate）
 

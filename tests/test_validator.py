@@ -33,3 +33,40 @@ def test_external_safety_fields_are_rejected():
         for issue in result["issues"]
     )
     assert result["status"] == "needs_review"
+
+
+def test_multiline_fb_parameters_are_not_variables_or_missing_semicolons():
+    code = """PROGRAM MAIN
+VAR
+    Axis1 : AXIS_REF;
+    Jogger : MC_MoveVelocity;
+    bEnable : BOOL;
+    rVelocity : REAL;
+    rAcceleration : REAL;
+END_VAR
+Jogger(
+    Execute := bEnable,
+    Velocity := rVelocity,
+    Acceleration := rAcceleration,
+    Axis := Axis1
+);
+END_PROGRAM
+"""
+    result = validate_st_code(code, category="motor_control")
+
+    assert not any(issue["code"] in {"W030", "W050"} for issue in result["issues"])
+
+
+def test_axis_error_id_requires_dint_receiver():
+    code = """PROGRAM MAIN
+VAR
+    Axis1 : AXIS_REF;
+    dwErrorID : DWORD;
+END_VAR
+dwErrorID := Axis1.ErrorID;
+END_PROGRAM
+"""
+    result = validate_st_code(code, category="motor_control")
+
+    assert any(issue["code"] == "E064" for issue in result["issues"])
+    assert result["status"] == "needs_review"

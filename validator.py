@@ -129,6 +129,7 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
 
     # ---- 3. 收集宣告變數 ----
     declared = set()
+    declared_types = {}
     in_var = False
     for raw in _strip_comments(code).splitlines():
         line = raw.strip()
@@ -145,6 +146,12 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
                 nm = nm.strip()
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nm):
                     declared.add(nm.upper())
+                    type_match = re.search(
+                        r":\s*([A-Za-z_][A-Za-z0-9_]*)",
+                        line,
+                    )
+                    if type_match:
+                        declared_types[nm.upper()] = type_match.group(1).upper()
 
     # ---- 4. 使用未宣告變數 (啟發式, info) ----
     body = _strip_comments(code)
@@ -157,6 +164,7 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
                           code, re.IGNORECASE):
         reserved.add(pou.upper())
     used = {}
+    paren_depth = 0
     for i, raw in enumerate(body.splitlines(), 1):
         # AXIS_REF/FB member names (Axis1.Busy) and named call parameters
         # (Enable := ...) are not standalone variables.
@@ -171,6 +179,13 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
             match.group(1).upper()
             for match in re.finditer(r"\.\s*([A-Za-z_][A-Za-z0-9_]*)", raw)
         )
+        if paren_depth > 0:
+            leading_param = re.match(
+                r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:=",
+                raw,
+            )
+            if leading_param:
+                member_or_param.add(leading_param.group(1).upper())
         for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", raw):
             up = tok.upper()
             if up in reserved:
@@ -183,6 +198,7 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
                 continue
             # 疑似函式呼叫 (後面接括號) 先略過，降低誤報
             used.setdefault(up, (tok, i))
+        paren_depth = max(0, paren_depth + raw.count("(") - raw.count(")"))
     undeclared = list(used.values())[:8]
     for name, ln in undeclared:
         issues.append({
@@ -215,20 +231,33 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
     _control_end = ("THEN", "DO", "OF", "ELSE")
     _skip_kw = tuple(k for k in _KEYWORDS)
     missing_semi = 0
+    paren_depth = 0
     for i, raw in enumerate(_strip_comments(code).splitlines(), 1):
         line = raw.strip()
         if not line:
             continue
         low = line.upper()
+        is_named_parameter = (
+            paren_depth > 0
+            and re.match(r"[A-Za-z_][A-Za-z0-9_]*\s*:=", line) is not None
+        )
+        next_paren_depth = max(0, paren_depth + line.count("(") - line.count(")"))
         if line.endswith((";", ",", "(", "{", "[")):
+            paren_depth = next_paren_depth
             continue
         if low.endswith(_control_end):
+            paren_depth = next_paren_depth
+            continue
+        if is_named_parameter:
+            paren_depth = next_paren_depth
             continue
         # 純關鍵字 / 區塊標記行
         first = re.split(r"[\s(]", low, maxsplit=1)[0]
         if first in _skip_kw or _VAR_OPENER.match(line) or _END_VAR.match(line):
+            paren_depth = next_paren_depth
             continue
         if line.endswith(":") or re.match(r"^[\w,\s]+:$", line):  # CASE 標籤
+            paren_depth = next_paren_depth
             continue
         # 看起來像敘述句 (含 := 或函式呼叫) 卻沒 ;
         if ":=" in line or re.search(r"\w\s*\(", line):
@@ -240,6 +269,40 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
                     "severity": "warning",
                     "line": i,
                 })
+        paren_depth = next_paren_depth
+
+    # AXIS_REF 公開狀態欄位有固定型別。這類錯誤能通過規則式語法檢查，
+    # 但會被 matiec 以 incompatible data types 拒絕。
+    axis_field_types = {
+        "POSITION": "REAL",
+        "VELOCITY": "REAL",
+        "BUSY": "BOOL",
+        "DONE": "BOOL",
+        "ACTIVE": "BOOL",
+        "ERROR": "BOOL",
+        "ERRORID": "DINT",
+        "ENABLED": "BOOL",
+        "HOMED": "BOOL",
+        "INVELOCITY": "BOOL",
+    }
+    for match in re.finditer(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*"
+        r"([A-Za-z_][A-Za-z0-9_]*)\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*;",
+        clean,
+        re.IGNORECASE,
+    ):
+        lhs, _, field = (part.upper() for part in match.groups())
+        expected_type = axis_field_types.get(field)
+        actual_type = declared_types.get(lhs)
+        if expected_type and actual_type and actual_type != expected_type:
+            issues.append({
+                "code": "E064",
+                "message": (
+                    f"'{match.group(1)}' 型別為 {actual_type}，但 AXIS_REF."
+                    f"{match.group(3)} 型別為 {expected_type}，無法直接賦值。"
+                ),
+                "severity": "error",
+            })
 
     # ---- 7. 馬達 / 運動控制安全語意 (info) ----
     if category == "motor_control":
@@ -257,18 +320,6 @@ def validate_st_code(code: str, description: str = "", category: str = "generic"
                     "此安全輸入由外部介面與 MC_* 函式方塊處理。"
                 ),
                 "severity": "error",
-            })
-        if not re.search(r"E[_]?STOP|EMERGENCY|ESTOP", up):
-            issues.append({
-                "code": "I060",
-                "message": "未偵測到緊急停止 (E-Stop) 相關邏輯，建議加入安全互鎖。",
-                "severity": "info",
-            })
-        if not re.search(r"LIMIT|LIM_|LSW|END_?SWITCH", up):
-            issues.append({
-                "code": "I061",
-                "message": "未偵測到極限開關 (Limit Switch) 處理。",
-                "severity": "info",
             })
         if not re.search(r"RESET|\bACK\b|\bRST\b", up):
             issues.append({
