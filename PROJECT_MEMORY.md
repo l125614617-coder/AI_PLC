@@ -166,6 +166,18 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
 - 新增 `plc_config.py`，非 loopback PLC 預設拒絕，實機需明確 opt-in。
 - pytest 現為 `34 passed`。
 
+### v0.2.1 Service Manager 修復
+
+- v0.2.0 發行 EXE 曾錯把 release 目錄當作專案根目錄，造成 Codex 找不到
+  `venv`、27B 找不到 `tools`／`models`；v0.2.1 改為驗證候選根目錄並向上
+  探索，也可由 GUI 選擇並保存專案路徑。
+- 新增 Codex 登入、venv、llama-server、模型、MSYS2/OpenPLC preflight。
+- start 現在等待 HTTP health Ready；失敗會回報 stderr、清除 state，模式
+  部分啟動失敗時會 rollback。
+- owned PID 會核對命令列 fingerprint，避免 PID 重用後誤停其他程序。
+- v0.2.1 發行 EXE 已完成 Codex UI、27B API/UI、OpenPLC 實機
+  start/ready/stop 驗證；pytest 為 `36 passed`。
+
 ## 啟動方式
 
 PLC-Assist：

@@ -1,9 +1,15 @@
-# PLC-Assist 0.2.0
+# PLC-Assist 0.2.1
 
 Release date: 2026-07-27
 
 ## Highlights
 
+- Fixed packaged EXE project-root discovery. A manager launched from
+  `release\PLC-Assist-0.2.1` now locates the operational project containing
+  `venv`, `models`, and `tools`.
+- Added a saved project-folder selector, dependency/login preflight checks,
+  synchronous Ready/Failed startup, actionable stderr reporting, rollback of
+  partial mode starts, and PID command-line fingerprinting.
 - GUI and CLI Service Manager for on-demand Ollama, Codex, llama.cpp,
   Streamlit, and OpenPLC lifecycle management.
 - Windows `PLC-Assist-Service-Manager.exe` and
@@ -17,7 +23,8 @@ Release date: 2026-07-27
 
 ## Verification
 
-- 34 pytest tests.
+- Packaged EXE start/ready/stop tests for Codex UI, 27B API/UI, and OpenPLC.
+- GUI startup smoke test and 36 passing pytest tests.
 - OpenPLC/Modbus:
   - negative JOG suite: 5/5;
   - repeated commands and direction switch suite: 6/6;

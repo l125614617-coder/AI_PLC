@@ -27,6 +27,10 @@ Codex 版顯示安全的推理摘要、進度與 token 使用量，不顯示或�
 只會停止由管理器自己啟動的 PID，外部服務只會標示為 external。llama.cpp
 可選擇 MTP tokens（0 表示關閉）。
 
+發行版 EXE 會向上尋找包含 `venv`、`app.py` 與啟動腳本的實際專案；若自動
+尋找失敗，可按「選擇資料夾」保存正確位置。啟動按鈕會先檢查依賴，並等到
+健康端點 Ready 才顯示成功。
+
 日常建議一次只啟動一個生成後端；Qwen3.6-27B 使用最多 RAM／共享 GPU
 記憶體，OpenPLC 只需在 Compile + Simulate 時啟動。
 
