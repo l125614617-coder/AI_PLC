@@ -384,7 +384,8 @@ def run_compile_and_simulate(code: str) -> dict:
             "issues": [{"severity": "error",
                         "message": f"編譯/模擬模組載入失敗：{_SIMULATION_IMPORT_ERROR}（請執行 setup/setup_windows_toolchain.ps1）",
                         "line": None, "in_generated_code": False}],
-            "wrapper_source": "", "axis_io_map": None, "full_source": "",
+            "wrapper_source": "", "axis_io_map": None,
+            "axis_register_map": None, "full_source": "",
         }
         return result
 
@@ -394,7 +395,8 @@ def run_compile_and_simulate(code: str) -> dict:
         result["compile"] = {
             "status": "compile_failed",
             "issues": [{"severity": "error", "message": f"編譯呼叫發生例外：{e}", "line": None, "in_generated_code": False}],
-            "wrapper_source": "", "axis_io_map": None, "full_source": "",
+            "wrapper_source": "", "axis_io_map": None,
+            "axis_register_map": None, "full_source": "",
         }
         return result
 
@@ -415,7 +417,12 @@ def run_compile_and_simulate(code: str) -> dict:
         selected_scenarios = scenarios_for_code(code)
         result["scenarios"] = {
             "status": "ran",
-            "results": run_all_scenarios(selected_scenarios, axis_io_map, full_source),
+            "results": run_all_scenarios(
+                selected_scenarios,
+                axis_io_map,
+                full_source,
+                register_map=result["compile"].get("axis_register_map"),
+            ),
         }
     except Exception as e:
         result["scenarios"] = {"status": "error", "message": str(e)}

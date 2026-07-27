@@ -64,7 +64,15 @@ AXIS_ADAPTER_IO_MAP = {
     "busy": 0, "done": 1, "error": 2, "enabled": 3,
     "estop": 4, "limitpos": 5, "limitneg": 6, "homeswitch": 7,
     "start": 8, "active": 9, "aborted": 10, "invelocity": 11,
-    "reset": 12, "moving": 13,
+    "reset": 12, "moving": 13, "reverse": 14,
+}
+AXIS_ADAPTER_REGISTER_MAP = {
+    "position_x10": 0,
+    "velocity_x10": 1,
+    "target_position_x10": 2,
+    "target_velocity_x10": 3,
+    "error_id": 4,
+    "axis_state": 5,
 }
 
 _AXIS_VAR_PATTERN = re.compile(r"(\w+)\s*:\s*AXIS_REF\s*;", re.IGNORECASE)
@@ -74,6 +82,10 @@ _BENABLE_PATTERN = re.compile(
 )
 _BRESET_PATTERN = re.compile(
     r"\bbResetReq\s*:\s*BOOL(?:\s*:=\s*[^;]+)?\s*;",
+    re.IGNORECASE,
+)
+_BREVERSE_PATTERN = re.compile(
+    r"\bbReverseReq\s*:\s*BOOL(?:\s*:=\s*[^;]+)?\s*;",
     re.IGNORECASE,
 )
 _PROGRAM_MAIN_HEADER = re.compile(r"\bPROGRAM\s+MAIN\b", re.IGNORECASE)
@@ -121,6 +133,13 @@ VAR
     AdpInVelocity AT %QX0.{AXIS_ADAPTER_IO_MAP['invelocity']} : BOOL;
     AdpReset      AT %QX0.{AXIS_ADAPTER_IO_MAP['reset']} : BOOL;
     AdpMoving     AT %QX0.{AXIS_ADAPTER_IO_MAP['moving']} : BOOL;
+    AdpReverse    AT %QX0.{AXIS_ADAPTER_IO_MAP['reverse']} : BOOL;
+    AdpPositionX10       AT %QW0 : INT;
+    AdpVelocityX10       AT %QW1 : INT;
+    AdpTargetPositionX10 AT %QW2 : INT;
+    AdpTargetVelocityX10 AT %QW3 : INT;
+    AdpErrorID           AT %QW4 : INT;
+    AdpAxisState         AT %QW5 : INT;
 END_VAR
 """
     bridge_stmts = f"""
@@ -136,6 +155,12 @@ AdpActive := {axis_var}.Active;
 AdpAborted := {axis_var}.CommandAborted;
 AdpInVelocity := {axis_var}.InVelocity;
 AdpMoving := {axis_var}.Velocity <> 0.0;
+AdpPositionX10 := REAL_TO_INT({axis_var}.Position * 10.0);
+AdpVelocityX10 := REAL_TO_INT({axis_var}.Velocity * 10.0);
+AdpTargetPositionX10 := REAL_TO_INT({axis_var}.TargetPosition * 10.0);
+AdpTargetVelocityX10 := REAL_TO_INT({axis_var}.TargetVelocity * 10.0);
+AdpErrorID := DINT_TO_INT({axis_var}.ErrorID);
+AdpAxisState := {axis_var}.AxisState;
 """
     code = _PROGRAM_MAIN_HEADER.sub(lambda m: m.group(0) + var_block, code, count=1)
 
@@ -152,6 +177,11 @@ AdpMoving := {axis_var}.Velocity <> 0.0;
         matches = list(_END_VAR_PATTERN.finditer(code))
         last_end = matches[-1].end()
         code = code[:last_end] + "\nbResetReq := AdpReset;" + code[last_end:]
+
+    if _BREVERSE_PATTERN.search(code):
+        matches = list(_END_VAR_PATTERN.finditer(code))
+        last_end = matches[-1].end()
+        code = code[:last_end] + "\nbReverseReq := AdpReverse;" + code[last_end:]
 
     code = _END_PROGRAM_PATTERN.sub(lambda m: bridge_stmts + m.group(0), code, count=1)
     return code
@@ -244,12 +274,12 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
     stub library via matiec's iec2c.exe (native Windows binary, no subprocess
     bridge into another OS).
 
-    Returns {status, stdout, stderr, issues, wrapper_source, axis_io_map, full_source}
+    Returns {status, stdout, stderr, issues, wrapper_source, axis_io_map,
+    axis_register_map, full_source}
     where status is one of:
     'compiled' | 'compile_failed' | 'wrapper_synthesis_failed' | 'iec2c_unavailable'.
-    `axis_io_map` is the fixed signal->coil mapping from AXIS_ADAPTER_IO_MAP when an
-    AXIS_REF variable was detected and the adapter was injected, else None (meaning
-    simulator.py has nothing Modbus-observable to drive for this program).
+    `axis_io_map` and `axis_register_map` are fixed Modbus mappings when an
+    AXIS_REF variable was detected and the adapter was injected, else None.
     `full_source` is the exact source that was compiled (stub library + adapted code +
     wrapper/config) -- simulator.py deploys this exact text, never recomputes it, so
     what got compile-checked is guaranteed to be what gets deployed.
@@ -259,7 +289,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
             "status": "wrapper_synthesis_failed",
             "stdout": "", "stderr": "",
             "issues": [{"severity": "error", "message": "No code to compile.", "line": None, "in_generated_code": False}],
-            "wrapper_source": "", "axis_io_map": None, "full_source": "",
+            "wrapper_source": "", "axis_io_map": None,
+            "axis_register_map": None, "full_source": "",
         }
 
     if not iec2c_available():
@@ -267,7 +298,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
             "status": "iec2c_unavailable",
             "stdout": "", "stderr": "",
             "issues": [{"severity": "error", "message": f"iec2c.exe not found at {IEC2C_EXE} -- cannot run the compile check.", "line": None, "in_generated_code": False}],
-            "wrapper_source": "", "axis_io_map": None, "full_source": "",
+            "wrapper_source": "", "axis_io_map": None,
+            "axis_register_map": None, "full_source": "",
         }
 
     full_source, code_start_line, code_end_line, wrapper_source, main_name, axis_io_map = _build_source(code)
@@ -279,7 +311,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
             "issues": [{"severity": "error",
                         "message": "Could not find any PROGRAM/FUNCTION_BLOCK/FUNCTION declaration in the generated ST code.",
                         "line": None, "in_generated_code": False}],
-            "wrapper_source": "", "axis_io_map": None, "full_source": "",
+            "wrapper_source": "", "axis_io_map": None,
+            "axis_register_map": None, "full_source": "",
         }
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="plcassist_compile_"))
@@ -296,7 +329,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
                 "status": "compile_failed",
                 "stdout": "", "stderr": str(e),
                 "issues": [{"severity": "error", "message": f"Compile invocation failed: {e}", "line": None, "in_generated_code": False}],
-                "wrapper_source": wrapper_source, "axis_io_map": None, "full_source": full_source,
+                "wrapper_source": wrapper_source, "axis_io_map": None,
+                "axis_register_map": None, "full_source": full_source,
             }
 
         combined_output = result.stdout + result.stderr
@@ -310,6 +344,11 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
             "issues": issues,
             "wrapper_source": wrapper_source,
             "axis_io_map": axis_io_map if not has_errors else None,
+            "axis_register_map": (
+                dict(AXIS_ADAPTER_REGISTER_MAP)
+                if axis_io_map is not None and not has_errors
+                else None
+            ),
             "full_source": full_source,
         }
     finally:

@@ -10,4 +10,5 @@ pytest-cache-files-*/
 .test-tmp*/
 models/
 tools/
+release/
 JidienSyncServer_Release_V1.02.00/

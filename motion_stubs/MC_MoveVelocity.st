@@ -93,11 +93,7 @@ IF Execute THEN
                 Axis.InVelocity := FALSE;
             END_IF;
 
-            IF Velocity >= 0.0 THEN
-                Axis.Position := Axis.Position + Axis.Velocity * 0.01;
-            ELSE
-                Axis.Position := Axis.Position - Axis.Velocity * 0.01;
-            END_IF;
+            Axis.Position := Axis.Position + Axis.Velocity * 0.01;
         END_IF;
     END_IF;
 ELSE

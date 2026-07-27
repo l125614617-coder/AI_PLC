@@ -13,6 +13,8 @@ assert: {signal: bool}} executed in order against compiler.AXIS_ADAPTER_IO_MAP's
 fixed coil addresses; `set` may be omitted on the first (pure-assert) step.
 """
 
+import re
+
 SCENARIO_ENABLE_RESPONDS = {
     "name": "enable_responds",
     "description": "Setting the mandated bEnable/start signal makes Enabled go True via MC_Power -- "
@@ -56,11 +58,79 @@ SCENARIO_JOG_RELEASE_STOPS = {
     ],
 }
 
+SCENARIO_JOG_COMMAND_CYCLES = {
+    "name": "jog_command_cycles",
+    "description": "The same runtime accepts a stop followed by a new JOG command.",
+    "steps": [
+        {
+            "set": {"start": True},
+            "wait_s": 0.3,
+            "assert": {"moving": True},
+            "assert_register": {"velocity_x10": {"gt": 0}},
+        },
+        {"set": {"start": False}, "wait_s": 0.2, "assert": {"moving": False}},
+        {
+            "set": {"start": True},
+            "wait_s": 0.3,
+            "assert": {"moving": True},
+            "assert_register": {"velocity_x10": {"gt": 0}},
+        },
+    ],
+}
+
+SCENARIO_NEGATIVE_JOG_LIMIT = {
+    "name": "negative_jog_limit",
+    "description": "Negative JOG produces negative velocity/position and the negative limit aborts it.",
+    "steps": [
+        {
+            "set": {"start": True},
+            "wait_s": 0.3,
+            "assert": {"moving": True},
+            "assert_register": {
+                "velocity_x10": {"lt": 0},
+                "position_x10": {"lt": 0},
+            },
+        },
+        {
+            "set": {"limitneg": True},
+            "wait_s": 0.2,
+            "assert": {"error": True, "aborted": True, "moving": False},
+            "assert_register": {"error_id": 2, "velocity_x10": 0},
+        },
+    ],
+}
+
+SCENARIO_DIRECTION_SWITCH = {
+    "name": "direction_switch",
+    "description": "A running velocity command can change from positive to negative without redeployment.",
+    "steps": [
+        {
+            "set": {"start": True, "reverse": False},
+            "wait_s": 0.3,
+            "assert_register": {"velocity_x10": {"gt": 0}},
+        },
+        {
+            "set": {"reverse": True},
+            "wait_s": 0.5,
+            "assert": {"moving": True},
+            "assert_register": {"velocity_x10": {"lt": 0}},
+        },
+    ],
+}
+
 SCENARIO_ABSOLUTE_REACHES_TARGET = {
     "name": "absolute_reaches_target",
     "description": "An absolute-position command completes and stops at its target.",
     "steps": [
-        {"set": {"start": True}, "wait_s": 1.5, "assert": {"done": True, "moving": False}},
+        {
+            "set": {"start": True},
+            "wait_s": 1.5,
+            "assert": {"done": True, "moving": False},
+            "assert_register": {
+                "position_x10": {"equals_register": "target_position_x10"},
+                "velocity_x10": 0,
+            },
+        },
     ],
 }
 
@@ -86,7 +156,19 @@ def scenarios_for_code(code: str) -> list:
     selected = list(ALL_SCENARIOS)
     upper = (code or "").upper()
     if "MC_MOVEVELOCITY" in upper:
-        selected.extend([SCENARIO_LIMIT_ABORTS_MOTION, SCENARIO_JOG_RELEASE_STOPS])
+        negative_velocity = bool(
+            re.search(r":\s*REAL\s*:=\s*-", code, re.IGNORECASE)
+        )
+        if negative_velocity:
+            selected.extend([SCENARIO_NEGATIVE_JOG_LIMIT, SCENARIO_JOG_RELEASE_STOPS])
+        else:
+            selected.extend([
+                SCENARIO_LIMIT_ABORTS_MOTION,
+                SCENARIO_JOG_RELEASE_STOPS,
+                SCENARIO_JOG_COMMAND_CYCLES,
+            ])
+        if "BREVERSEREQ" in upper:
+            selected.append(SCENARIO_DIRECTION_SWITCH)
     if "MC_MOVEABSOLUTE" in upper:
         selected.extend([SCENARIO_LIMIT_ABORTS_MOTION, SCENARIO_ABSOLUTE_REACHES_TARGET])
     if "MC_RESET" in upper and "BRESETREQ" in upper:

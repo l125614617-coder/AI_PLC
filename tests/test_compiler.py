@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from compiler import compile_st_code, iec2c_available, _detect_axis_variable, AXIS_ADAPTER_IO_MAP
+from compiler import (
+    AXIS_ADAPTER_IO_MAP,
+    AXIS_ADAPTER_REGISTER_MAP,
+    _detect_axis_variable,
+    compile_st_code,
+    iec2c_available,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -33,6 +39,7 @@ END_PROGRAM
     assert result["wrapper_source"] == ""
     # this code declares 'Axis1 : AXIS_REF;', so the adapter should auto-inject
     assert result["axis_io_map"] == AXIS_ADAPTER_IO_MAP
+    assert result["axis_register_map"] == AXIS_ADAPTER_REGISTER_MAP
 
 
 def test_axis_variable_detected_regardless_of_name():

@@ -16,6 +16,20 @@ Codex 版顯示安全的推理摘要、進度與 token 使用量，不顯示或�
 模擬 adapter 同時支援 `bEnable : BOOL;` 與
 `bEnable : BOOL := FALSE;`，兩種宣告都能由 Modbus `start` 訊號驅動。
 
+## 建議啟動方式：Service Manager
+
+```powershell
+.\venv\Scripts\python.exe service_manager.py
+```
+
+管理器可選「快速本機」「Codex」「27B 高品質」或「全部測試」，並可選擇
+是否同時啟動 OpenPLC。每個服務都有啟動、停止、開啟網頁、日誌及健康狀態；
+只會停止由管理器自己啟動的 PID，外部服務只會標示為 external。llama.cpp
+可選擇 MTP tokens（0 表示關閉）。
+
+日常建議一次只啟動一個生成後端；Qwen3.6-27B 使用最多 RAM／共享 GPU
+記憶體，OpenPLC 只需在 Compile + Simulate 時啟動。
+
 會做這個東西是因為每次要手寫一段基本的運動控制 ST 都要重新想一次安全互鎖邏輯，很煩，乾脆讓 LLM 先出草稿，人再看過修。但 LLM 生成的程式碼不能照單全收——所以這個專案真正花時間的地方其實不是「生成」，是後面那三層驗證，確保吐出來的東西至少「編得過」、而且「行為合理」，不是每次都靠肉眼抓 bug。
 
 ## 這東西在幹嘛
@@ -130,6 +144,8 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 - `app_llamacpp.py` — Qwen3.6-27B / llama.cpp MTP 版入口
 - `codex_provider.py` — 以唯讀、暫時 Codex CLI 工作階段生成 ST
 - `local_provider.py` — llama-server OpenAI-compatible 串流轉接器
+- `service_manager.py` — 按需啟停服務的 GUI／CLI 管理器
+- `plc_config.py` — OpenPLC/Modbus 設定與遠端硬體安全閘
 - `validator.py` — 純規則式的靜態檢查，沒有外部依賴，永遠能跑
 - `compiler.py` / `simulator.py` / `scenarios.py` — 真正編譯 + 模擬部署那條 pipeline
 - `motion_stubs/` — 手寫的運動控制函式方塊模擬庫（`MC_Power`、`MC_MoveAbsolute` 之類），LLM 生成的程式碼是接這一套跑的，不是自己重新發明安全邏輯
@@ -137,4 +153,4 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 
 ## 目前的狀態老實說
 
-這個 9B 的模型（本機能跑得動的大小）偶爾還是會生成語法錯的、或邏輯怪怪的程式碼，這是預期中的事，也是為什麼要有編譯與 runtime 情境把關，而不是完全信任 LLM 的輸出。目前模擬部署會依 JOG／Absolute 程式測試啟用、緊急停止、限位中止、Reset、JOG 放開停止，以及 Absolute 到位；它仍是簡化的虛擬軸模型，不等同實機伺服器、機構負載與安全迴路驗證。
+這個 9B 的模型（本機能跑得動的大小）偶爾還是會生成語法錯的、或邏輯怪怪的程式碼，這是預期中的事，也是為什麼要有編譯與 runtime 情境把關，而不是完全信任 LLM 的輸出。目前模擬部署會依 JOG／Absolute 程式測試啟用、緊急停止、正負限位、Reset、連續啟停、運行中方向切換，以及 Absolute 到位；位置、速度、目標值、ErrorID 與 AxisState 會透過 holding registers 驗證。它仍是簡化的虛擬軸模型，不等同實機伺服器、機構負載與安全迴路驗證。

@@ -92,6 +92,21 @@ cd D:\AI_PLC
 
 ## 4. 啟動服務
 
+### 4.0 按需啟動（建議）
+
+```powershell
+.\venv\Scripts\python.exe service_manager.py
+```
+
+Service Manager 可個別啟停各生成後端、三個 Streamlit 介面與 OpenPLC，
+並顯示 PID／健康狀態、開啟網頁或日誌。它不會停止非自己啟動的程序。
+
+```powershell
+.\venv\Scripts\python.exe service_manager.py status
+.\venv\Scripts\python.exe service_manager.py start llamacpp --openplc
+.\venv\Scripts\python.exe service_manager.py stop llamacpp
+```
+
 ### 4.1 只跑基本生成功能（不需要工具鏈）
 
 Ollama 本地版：
@@ -171,7 +186,26 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 Runtime 情境會依生成程式選擇適用案例：共同測試啟用與 E-Stop；
 `MC_MoveVelocity` 另測限位中止與放開 JOG 後停止；`MC_MoveAbsolute`
 另測限位中止與到位；有 `MC_Reset`／`bResetReq` 時另測錯誤復歸。
+adapter 以 holding registers 暴露縮放 10 倍的 Position、Velocity、
+TargetPosition、TargetVelocity，以及 ErrorID、AxisState。
 這些測試使用簡化虛擬軸，不能取代實機安全驗證。
+
+### 實機連線安全閘
+
+連線設定可參考 `hardware_config.example.env`。預設只允許 loopback；
+Web 或 Modbus 指向非本機時會拒絕執行，除非明確設定
+`PLC_ASSIST_ALLOW_REAL_HARDWARE=1`。啟用前必須另行確認實機 I/O mapping、
+驅動器參數、軟硬體限位、E-Stop 安全鏈、低速試車程序與現場風險評估。
+
+### 建立 Windows 發行包
+
+```powershell
+.\setup\build_release.ps1 -Version 0.2.0
+```
+
+輸出為 `release\PLC-Assist-0.2.0-win64.zip`，包含 GUI Service Manager、
+CLI 執行檔、程式碼、設定範例與文件；大型模型、llama.cpp binaries 與
+OpenPLC 安裝不打包。
 
 **這條最重要，務必記住**：Streamlit 的自動重整 (Rerun) 只會重新執行 `app.py` 本身，**不保證會重新載入 `compiler.py`、`simulator.py`、`scenarios.py`、`st_common.py`、`validator.py` 這些被 import 進去的模組**。也就是說，如果你（或未來維護這個專案的人）改了這些檔案的內容，光是在瀏覽器按重新整理或 Streamlit 的 Rerun 按鈕**不夠**——必須把 Streamlit process 完全停掉、重新執行 `streamlit run app.py`，改動才會真正生效。這個坑在開發過程中真實踩過：連續好幾輪生成結果對不上預期的修正，最後發現是因為同一個 Streamlit process 從很早之前就一直沒重啟過。
 

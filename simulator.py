@@ -18,15 +18,17 @@ from pathlib import Path
 
 import requests
 from pymodbus.client.sync import ModbusTcpClient
+from plc_config import load_plc_connection
 
 _PROG_FILE_PATTERN = re.compile(r"value='([^']+)'\s+id='prog_file'")
 
 OPENPLC_DIR = Path(f"C:/msys64/home/{os.environ.get('USERNAME', '')}/OpenPLC_v3")
-WEB_BASE = os.environ.get("OPENPLC_WEB_BASE", "http://localhost:8080").rstrip("/")
-MODBUS_HOST = "127.0.0.1"
-MODBUS_PORT = 502
-WEB_USERNAME = "openplc"
-WEB_PASSWORD = "openplc"
+_CONNECTION = load_plc_connection()
+WEB_BASE = _CONNECTION.web_base
+MODBUS_HOST = _CONNECTION.modbus_host
+MODBUS_PORT = _CONNECTION.modbus_port
+WEB_USERNAME = _CONNECTION.web_username
+WEB_PASSWORD = _CONNECTION.web_password
 
 
 def openplc_available() -> bool:
@@ -115,7 +117,38 @@ def stop_openplc(session: requests.Session = None) -> None:
     _kill_lingering_openplc()
 
 
-def run_scenario(scenario: dict, io_map: dict, full_source: str, timeout_s: int = 30) -> dict:
+def _signed_register(value: int) -> int:
+    return value - 0x10000 if value & 0x8000 else value
+
+
+def _register_matches(actual: int, expected, registers: dict | None = None) -> bool:
+    if not isinstance(expected, dict):
+        return actual == expected
+    return (
+        ("eq" not in expected or actual == expected["eq"])
+        and ("gt" not in expected or actual > expected["gt"])
+        and ("gte" not in expected or actual >= expected["gte"])
+        and ("lt" not in expected or actual < expected["lt"])
+        and ("lte" not in expected or actual <= expected["lte"])
+        and (
+            "between" not in expected
+            or expected["between"][0] <= actual <= expected["between"][1]
+        )
+        and (
+            "equals_register" not in expected
+            or registers is not None
+            and actual == registers[expected["equals_register"]]
+        )
+    )
+
+
+def run_scenario(
+    scenario: dict,
+    io_map: dict,
+    full_source: str,
+    timeout_s: int = 30,
+    register_map: dict | None = None,
+) -> dict:
     """Deploy `full_source` fresh, drive/assert `scenario`'s steps over Modbus
     against `io_map` (compiler.AXIS_ADAPTER_IO_MAP), then tear down.
     Returns {name, passed, deploy_status, steps: [{ok, expected, actual}], error}."""
@@ -146,16 +179,59 @@ def run_scenario(scenario: dict, io_map: dict, full_source: str, timeout_s: int 
                 time.sleep(step["wait_s"])
 
             expected = step.get("assert", {})
-            if expected:
+            expected_registers = step.get("assert_register", {})
+            if expected or expected_registers:
+                ok = True
+                actual = {}
                 rr = client.read_coils(0, n_coils)
                 if rr.isError():
-                    all_ok = False
-                    result["steps"].append({"ok": False, "expected": expected, "actual": f"Modbus read error: {rr}"})
-                    continue
-                actual = {sig: rr.bits[idx] for sig, idx in io_map.items() if sig in expected}
-                ok = all(actual[sig] == val for sig, val in expected.items())
+                    ok = False
+                    actual["coils_error"] = f"Modbus read error: {rr}"
+                else:
+                    actual["coils"] = {
+                        sig: rr.bits[idx]
+                        for sig, idx in io_map.items()
+                        if sig in expected
+                    }
+                    ok = ok and all(
+                        actual["coils"][sig] == value
+                        for sig, value in expected.items()
+                    )
+
+                if expected_registers:
+                    if not register_map:
+                        ok = False
+                        actual["registers_error"] = "No register map available"
+                    else:
+                        n_registers = max(register_map.values()) + 1
+                        registers = client.read_holding_registers(0, n_registers)
+                        if registers.isError():
+                            ok = False
+                            actual["registers_error"] = f"Modbus read error: {registers}"
+                        else:
+                            all_registers = {
+                                sig: _signed_register(registers.registers[idx])
+                                for sig, idx in register_map.items()
+                            }
+                            actual["registers"] = {
+                                sig: all_registers[sig] for sig in expected_registers
+                            }
+                            ok = ok and all(
+                                _register_matches(
+                                    actual["registers"][sig],
+                                    expectation,
+                                    all_registers,
+                                )
+                                for sig, expectation in expected_registers.items()
+                            )
+
                 all_ok = all_ok and ok
-                result["steps"].append({"ok": ok, "expected": expected, "actual": actual})
+                result["steps"].append({
+                    "ok": ok,
+                    "expected": expected,
+                    "expected_registers": expected_registers,
+                    "actual": actual,
+                })
 
         result["passed"] = all_ok
     except Exception as e:
@@ -168,5 +244,20 @@ def run_scenario(scenario: dict, io_map: dict, full_source: str, timeout_s: int 
     return result
 
 
-def run_all_scenarios(scenarios: list, io_map: dict, full_source: str, timeout_s: int = 30) -> list:
-    return [run_scenario(s, io_map, full_source, timeout_s=timeout_s) for s in scenarios]
+def run_all_scenarios(
+    scenarios: list,
+    io_map: dict,
+    full_source: str,
+    timeout_s: int = 30,
+    register_map: dict | None = None,
+) -> list:
+    return [
+        run_scenario(
+            scenario,
+            io_map,
+            full_source,
+            timeout_s=timeout_s,
+            register_map=register_map,
+        )
+        for scenario in scenarios
+    ]

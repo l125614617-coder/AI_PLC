@@ -153,6 +153,19 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
   - Ollama qwen3.5:9b JOG：validator 0 issue、matiec compiled。
 - pytest 現為 `23 passed`。
 
+### Service Manager、數值觀測與進階 Runtime
+
+- 新增 `service_manager.py` GUI／CLI，可按模式啟停、查看健康/PID、開網頁
+  與日誌，並調整 llama.cpp MTP tokens；只停止自己啟動的 PID。
+- 新增 holding registers：Position、Velocity、TargetPosition、
+  TargetVelocity（縮放 10 倍）、ErrorID、AxisState。
+- 修正 `MC_MoveVelocity` 負速度時位置方向顛倒。
+- OpenPLC 實測：負向 JOG／負限位／Reset 5/5；連續啟停與正轉切負轉
+  6/6；Absolute Position 5/5，Position=250.0、Velocity=0。
+- 新增 compile timeout 回歸測試。
+- 新增 `plc_config.py`，非 loopback PLC 預設拒絕，實機需明確 opt-in。
+- pytest 現為 `34 passed`。
+
 ## 啟動方式
 
 PLC-Assist：
