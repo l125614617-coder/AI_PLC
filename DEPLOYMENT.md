@@ -115,6 +115,23 @@ cd D:\AI_PLC
 自動通過 matiec 編譯閘門，失敗時預設自動修復兩輪；可用
 `PLC_ASSIST_CODEX_MAX_REPAIRS` 調整次數。
 
+Qwen3.6-27B llama.cpp MTP 版（本機已放置模型與 Vulkan 發行檔時）：
+
+```powershell
+cd D:\AI_PLC
+.\setup\start_llamacpp.ps1
+```
+
+另開一個 PowerShell：
+
+```powershell
+.\venv\Scripts\python.exe -m streamlit run app_llamacpp.py --server.port 8503
+```
+
+llama-server 預設只監聽 `127.0.0.1:8082`，介面在 `8503`。可用
+`PLC_ASSIST_LLAMACPP_BASE` 與 `PLC_ASSIST_LLAMACPP_MODEL` 覆寫 API 位址及
+模型名稱。`setup/start_llamacpp.ps1 -MtpTokens 0` 可關閉 MTP 做基準測試。
+
 ### 4.2 完整功能（含 Compile + Simulate）
 
 除了上面的 Streamlit app，還要另外啟動 OpenPLC 的 webserver（負責接收部署請求、跑 Modbus）：
@@ -141,6 +158,8 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 |---|---|---|
 | 8501 | Streamlit | 主要操作介面 |
 | 8502 | Streamlit | Codex 推理版操作介面 |
+| 8503 | Streamlit | llama.cpp MTP 版操作介面 |
+| 8082 | llama.cpp | Qwen3.6-27B OpenAI-compatible API（僅 localhost） |
 | 11434 | Ollama | LLM 推論 API |
 | 8080（可設定） | OpenPLC webserver | 部署程式、觸發編譯用的 HTTP 介面 |
 | 502 | OpenPLC Modbus TCP | 模擬情境測試讀寫用 |
@@ -148,6 +167,11 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 開發服務的實際監聽介面由各服務設定決定；若機器位於共用網路，請用防火牆限制存取。
 
 ## 6. 已知限制與維運注意事項
+
+Runtime 情境會依生成程式選擇適用案例：共同測試啟用與 E-Stop；
+`MC_MoveVelocity` 另測限位中止與放開 JOG 後停止；`MC_MoveAbsolute`
+另測限位中止與到位；有 `MC_Reset`／`bResetReq` 時另測錯誤復歸。
+這些測試使用簡化虛擬軸，不能取代實機安全驗證。
 
 **這條最重要，務必記住**：Streamlit 的自動重整 (Rerun) 只會重新執行 `app.py` 本身，**不保證會重新載入 `compiler.py`、`simulator.py`、`scenarios.py`、`st_common.py`、`validator.py` 這些被 import 進去的模組**。也就是說，如果你（或未來維護這個專案的人）改了這些檔案的內容，光是在瀏覽器按重新整理或 Streamlit 的 Rerun 按鈕**不夠**——必須把 Streamlit process 完全停掉、重新執行 `streamlit run app.py`，改動才會真正生效。這個坑在開發過程中真實踩過：連續好幾輪生成結果對不上預期的修正，最後發現是因為同一個 Streamlit process 從很早之前就一直沒重啟過。
 
@@ -158,7 +182,6 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
   - 不支援指定長度的字串型別：`STRING[20]`、`STRING(20)` 都會編譯失敗，只能用不指定長度的 `STRING`。
   - 識別字不能以底線開頭（IEC 61131-3 規定必須以字母開頭）。
 - **編譯錯誤訊息本身有其極限**：這套 matiec 建置版本一旦遇到真實語法錯誤，錯誤回報的行號有時會有偏移（誤差通常在幾行內），需要對照附近的程式碼判斷；`compiler.py` 已經會在編譯前清空所有註解以避免最嚴重的一種錯誤訊息亂跳問題，但行號偏移本身沒有完全解決。
-- **Runtime Simulation 目前只驗證 `MC_Power` 的啟用/緊急停止回應**，這是不管生成的程式用哪個運動控制函式方塊都通用的行為；更細節的動作正確性（例如是否真的移動到定位）目前還沒涵蓋，這是有意為之的範圍限縮（詳見 `scenarios.py` 開頭的說明）。
 - **LLM 生成品質有其機率性**：9B 模型偶爾仍會生成語法錯誤或邏輯瑕疵的程式碼，這是預期中的行為，也正是整條 compile-check pipeline 存在的理由——目標不是讓 LLM 每次都完美，而是可靠地攔下它犯錯的時候。UI 上「🧠 顯示思考過程」目前預設關閉，因為實測發現開啟思考模式在這組規範較多的 system prompt 下，容易讓模型陷入反覆推敲甚至耗盡整個 token 預算、完全生不出程式碼。
 
 ## 7. 疑難排解
@@ -182,7 +205,10 @@ taskkill /F /IM openplc.exe
 D:\AI_PLC\
 ├── app.py                  # Streamlit UI + system prompt + 生成/驗證/模擬的串接邏輯
 ├── app_codex.py             # Codex 推理版 Streamlit 入口
+├── app_llamacpp.py          # llama.cpp MTP 版 Streamlit 入口
 ├── codex_provider.py         # Codex CLI JSONL 事件與生成後端
+├── local_provider.py         # llama.cpp 串流 API adapter
+├── benchmark_local_models.py # Ollama / llama.cpp 可重跑 PLC 基準
 ├── validator.py             # Stage 1：規則式靜態驗證（零依賴）
 ├── compiler.py               # Stage 2：真實 matiec 編譯檢查 + 軸介面自動注入
 ├── simulator.py               # Stage 3-5：部署到 OpenPLC + Modbus 情境測試

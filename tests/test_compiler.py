@@ -121,6 +121,29 @@ END_PROGRAM
     assert "bEnable := AdpStart;" in result["full_source"]
 
 
+def test_reset_and_runtime_status_are_bridged_to_modbus():
+    code = """
+PROGRAM MAIN
+VAR
+    Axis1     : AXIS_REF;
+    Pwr       : MC_Power;
+    Rst       : MC_Reset;
+    bEnable   : BOOL;
+    bResetReq : BOOL := FALSE;
+END_VAR
+Pwr(Enable := bEnable, Axis := Axis1);
+Rst(Execute := bResetReq, Axis := Axis1);
+END_PROGRAM
+"""
+    result = compile_st_code(code)
+
+    assert result["status"] == "compiled"
+    assert result["axis_io_map"]["reset"] == AXIS_ADAPTER_IO_MAP["reset"]
+    assert "bResetReq := AdpReset;" in result["full_source"]
+    assert "AdpAborted := Axis1.CommandAborted;" in result["full_source"]
+    assert "AdpMoving := Axis1.Velocity <> 0.0;" in result["full_source"]
+
+
 def test_chinese_comments_dont_cause_cascading_bogus_errors():
     """Discovered live: this matiec build's error recovery gets badly confused
     by non-ASCII (Chinese) text inside comments -- a genuinely broken program

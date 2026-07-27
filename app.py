@@ -11,7 +11,7 @@ from validator import validate_st_code
 try:
     from compiler import compile_st_code, iec2c_available
     from simulator import run_all_scenarios, openplc_available
-    from scenarios import ALL_SCENARIOS
+    from scenarios import scenarios_for_code
     _SIMULATION_IMPORT_ERROR = None
 except Exception as _e:  # 例如缺少 pymodbus/requests，或路徑尚未設定好
     _SIMULATION_IMPORT_ERROR = str(_e)
@@ -23,12 +23,41 @@ except Exception as _e:  # 例如缺少 pymodbus/requests，或路徑尚未設�
 def get_ollama_client():
     return Client(host="http://localhost:11434")
 
+
+@st.cache_resource
+def get_llamacpp_client():
+    from local_provider import LlamaCppClient
+
+    return LlamaCppClient(
+        os.environ.get(
+            "PLC_ASSIST_LLAMACPP_BASE",
+            "http://127.0.0.1:8082/v1",
+        )
+    )
+
+
 PROVIDER = os.environ.get("PLC_ASSIST_PROVIDER", "ollama").lower()
 IS_CODEX = PROVIDER == "codex"
-client = None if IS_CODEX else get_ollama_client()
-MODEL_NAME = "gpt-5.6-sol" if IS_CODEX else "qwen3.5:9b"
+IS_LLAMACPP = PROVIDER in {"llamacpp", "llama.cpp"}
+if IS_CODEX:
+    client = None
+    MODEL_NAME = os.environ.get("PLC_ASSIST_CODEX_MODEL", "gpt-5.6-sol")
+    edition_name = "Codex 推理版"
+    provider_label = "Codex CLI（唯讀暫時工作階段）"
+elif IS_LLAMACPP:
+    client = get_llamacpp_client()
+    MODEL_NAME = os.environ.get(
+        "PLC_ASSIST_LLAMACPP_MODEL",
+        "Qwen3.6-27B-Q3_K_M.gguf",
+    )
+    edition_name = "llama.cpp MTP 版"
+    provider_label = "本機 llama.cpp"
+else:
+    client = get_ollama_client()
+    MODEL_NAME = os.environ.get("PLC_ASSIST_OLLAMA_MODEL", "qwen3.5:9b")
+    edition_name = "Ollama 本地版"
+    provider_label = "本機 Ollama"
 
-edition_name = "Codex 推理版" if IS_CODEX else "Ollama 本地版"
 st.set_page_config(page_title=f"PLC-Assist {edition_name}", layout="wide")
 
 # ==========================================
@@ -383,7 +412,11 @@ def run_compile_and_simulate(code: str) -> dict:
 
     try:
         full_source = result["compile"]["full_source"]
-        result["scenarios"] = {"status": "ran", "results": run_all_scenarios(ALL_SCENARIOS, axis_io_map, full_source)}
+        selected_scenarios = scenarios_for_code(code)
+        result["scenarios"] = {
+            "status": "ran",
+            "results": run_all_scenarios(selected_scenarios, axis_io_map, full_source),
+        }
     except Exception as e:
         result["scenarios"] = {"status": "error", "message": str(e)}
 
@@ -394,7 +427,7 @@ def run_compile_and_simulate(code: str) -> dict:
 # 5. 前端 UI 介面層
 # ==========================================
 st.title(f"⚙️ Generate Structured Text (PLC-Assist {edition_name})")
-st.caption(f"模型來源：{MODEL_NAME}｜{'Codex CLI（唯讀暫時工作階段）' if IS_CODEX else '本機 Ollama'}")
+st.caption(f"模型來源：{MODEL_NAME}｜{provider_label}")
 st.markdown("---")
 
 col1, col2 = st.columns([4, 6])

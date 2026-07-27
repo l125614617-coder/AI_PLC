@@ -1,6 +1,6 @@
 # PLC-Assist 專案記憶
 
-最後更新：2026-07-24（Asia/Taipei）
+最後更新：2026-07-27（Asia/Taipei）
 
 ## 目前狀態
 
@@ -13,6 +13,16 @@
 - OpenPLC_v3 安裝位置：`C:\msys64\home\Jimmy\OpenPLC_v3`
 - `iec2c.exe`、`openplc.exe` 與 OpenPLC Python 環境均已建立。
 - OpenPLC blank program 已實際編譯成功。
+- Intel Core Ultra 7 155H 的整合式 Intel Arc 已由 llama.cpp Vulkan 辨識：
+  18,400 MiB shared GPU memory。
+- llama.cpp Windows Vulkan b10142 安裝於 `tools/llama.cpp`（Git 排除）。
+- Qwen3.6-27B MTP Q3_K_M 安裝於
+  `models/Qwen3.6-27B-Q3_K_M.gguf`（13,818,688,640 bytes，Git 排除）。
+- 模型 SHA-256：
+  `f8a9329b78446254200d5cd387c3d8c8f374a2b824696d4b550f42461b970310`，
+  與 Hugging Face LFS OID 一致。
+- llama.cpp MTP API：`http://127.0.0.1:8082`
+- PLC-Assist llama.cpp MTP 版：`http://localhost:8503`
 
 上述服務於 2026-07-24 已用背景程序啟動；重新開機後需要重新啟動。
 
@@ -100,6 +110,49 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
 - 已用使用者回報的完整 JOG 程式重新部署 OpenPLC：
   `enable_responds` 與 `estop_cuts_power` 均通過（2/2）。
 
+### Qwen3.6-27B llama.cpp MTP 版
+
+- 新增 `app_llamacpp.py`，與 8501 Ollama、8502 Codex 版本並存。
+- 新增 `local_provider.py`，把 llama-server OpenAI-compatible SSE 轉成既有
+  UI 使用的串流介面。
+- 新增 `setup/start_llamacpp.ps1`，預設 Vulkan、8K context、單一 slot、
+  MTP draft tokens=2；使用 `-MtpTokens 0` 可跑無 MTP 基準。
+- 新增 `benchmark_local_models.py`，同一 PLC prompt 可比較 Ollama 與
+  llama.cpp，並自動執行 validator 與 matiec。
+- 短請求、256 completion tokens 實測：
+  - 無 MTP：2.90 tokens/s、100.7 秒。
+  - MTP=2：4.57 tokens/s、70.5 秒，draft acceptance 66.5%。
+  - MTP 生成吞吐提升約 57.7%。
+- 完整 PLC prompt 實測：
+  - JOG：170.5 秒，5.13 tokens/s，validator 通過、matiec compiled。
+  - Absolute Position：194.6 秒，5.13 tokens/s，validator 通過、
+    matiec compiled。
+  - 兩次完整案例的 MTP acceptance 約 80%。
+- Qwen3.6 產生的 JOG 程式已實際部署到 OpenPLC：
+  `enable_responds` 與 `estop_cuts_power` 均通過（2/2）。
+- 相同 JOG prompt 的現有 `qwen3.5:9b`：141.2 秒、9.67 tokens/s，
+  validator 與 matiec 同樣通過。因此 27B MTP 目前定位為較慢的高品質
+  實驗模式，Ollama 9B 保留為預設快速模式。
+- pytest 當時為 `20 passed`。
+
+### 擴充 Runtime 情境
+
+- axis adapter 新增 `active`、`aborted`、`invelocity`、`reset`、`moving`
+  Modbus coils，並可將 `bResetReq` 接到測試輸入。
+- `MC_MoveVelocity` 現在會處理正負限位，限位或 E-Stop 時同步設定
+  `Axis.CommandAborted`，放開 JOG Execute 時速度歸零。
+- 情境會依生成程式使用 `MC_MoveVelocity` 或 `MC_MoveAbsolute` 自動選擇，
+  不會對 JOG 錯誤要求定位完成。
+- Qwen3.6 JOG 程式已在 OpenPLC 實測 5/5：
+  `enable_responds`、`estop_cuts_power`、`limit_aborts_motion`、
+  `jog_release_stops`、`reset_clears_error`。
+- Absolute Position fixture 已在 OpenPLC 實測 5/5，額外確認
+  `absolute_reaches_target` 的 `Done=TRUE` 且速度歸零。
+- 2026-07-27 重新執行即時模型驗收：
+  - llama.cpp Qwen3.6-27B JOG：validator 0 issue、matiec compiled。
+  - Ollama qwen3.5:9b JOG：validator 0 issue、matiec compiled。
+- pytest 現為 `23 passed`。
+
 ## 啟動方式
 
 PLC-Assist：
@@ -113,6 +166,13 @@ PLC-Assist Codex 推理版：
 
 ```powershell
 .\venv\Scripts\python.exe -m streamlit run app_codex.py --server.port 8502
+```
+
+Qwen3.6-27B llama.cpp MTP：
+
+```powershell
+.\setup\start_llamacpp.ps1
+.\venv\Scripts\python.exe -m streamlit run app_llamacpp.py --server.port 8503
 ```
 
 OpenPLC：

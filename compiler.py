@@ -63,12 +63,17 @@ def _load_motion_stubs() -> str:
 AXIS_ADAPTER_IO_MAP = {
     "busy": 0, "done": 1, "error": 2, "enabled": 3,
     "estop": 4, "limitpos": 5, "limitneg": 6, "homeswitch": 7,
-    "start": 8,
+    "start": 8, "active": 9, "aborted": 10, "invelocity": 11,
+    "reset": 12, "moving": 13,
 }
 
 _AXIS_VAR_PATTERN = re.compile(r"(\w+)\s*:\s*AXIS_REF\s*;", re.IGNORECASE)
 _BENABLE_PATTERN = re.compile(
     r"\bbEnable\s*:\s*BOOL(?:\s*:=\s*[^;]+)?\s*;",
+    re.IGNORECASE,
+)
+_BRESET_PATTERN = re.compile(
+    r"\bbResetReq\s*:\s*BOOL(?:\s*:=\s*[^;]+)?\s*;",
     re.IGNORECASE,
 )
 _PROGRAM_MAIN_HEADER = re.compile(r"\bPROGRAM\s+MAIN\b", re.IGNORECASE)
@@ -111,6 +116,11 @@ VAR
     AdpError      AT %QX0.{AXIS_ADAPTER_IO_MAP['error']} : BOOL;
     AdpEnabled    AT %QX0.{AXIS_ADAPTER_IO_MAP['enabled']} : BOOL;
     AdpStart      AT %QX0.{AXIS_ADAPTER_IO_MAP['start']} : BOOL;
+    AdpActive     AT %QX0.{AXIS_ADAPTER_IO_MAP['active']} : BOOL;
+    AdpAborted    AT %QX0.{AXIS_ADAPTER_IO_MAP['aborted']} : BOOL;
+    AdpInVelocity AT %QX0.{AXIS_ADAPTER_IO_MAP['invelocity']} : BOOL;
+    AdpReset      AT %QX0.{AXIS_ADAPTER_IO_MAP['reset']} : BOOL;
+    AdpMoving     AT %QX0.{AXIS_ADAPTER_IO_MAP['moving']} : BOOL;
 END_VAR
 """
     bridge_stmts = f"""
@@ -122,6 +132,10 @@ AdpBusy := {axis_var}.Busy;
 AdpDone := {axis_var}.Done;
 AdpError := {axis_var}.Error;
 AdpEnabled := {axis_var}.Enabled;
+AdpActive := {axis_var}.Active;
+AdpAborted := {axis_var}.CommandAborted;
+AdpInVelocity := {axis_var}.InVelocity;
+AdpMoving := {axis_var}.Velocity <> 0.0;
 """
     code = _PROGRAM_MAIN_HEADER.sub(lambda m: m.group(0) + var_block, code, count=1)
 
@@ -133,6 +147,11 @@ AdpEnabled := {axis_var}.Enabled;
         matches = list(_END_VAR_PATTERN.finditer(code))
         last_end = matches[-1].end()
         code = code[:last_end] + "\nbEnable := AdpStart;" + code[last_end:]
+
+    if _BRESET_PATTERN.search(code):
+        matches = list(_END_VAR_PATTERN.finditer(code))
+        last_end = matches[-1].end()
+        code = code[:last_end] + "\nbResetReq := AdpReset;" + code[last_end:]
 
     code = _END_PROGRAM_PATTERN.sub(lambda m: bridge_stmts + m.group(0), code, count=1)
     return code

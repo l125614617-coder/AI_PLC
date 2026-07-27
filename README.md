@@ -6,6 +6,7 @@
 |---|---|---|
 | Ollama 本地版 | `http://localhost:8501` | 本機 `qwen3.5:9b` |
 | Codex 推理版 | `http://localhost:8502` | 已登入的 Codex CLI，預設 `gpt-5.6-sol` |
+| llama.cpp MTP 版 | `http://localhost:8503` | 本機 `Qwen3.6-27B Q3_K_M` |
 
 Codex 版顯示安全的推理摘要、進度與 token 使用量，不顯示或偽造模型的私有
 逐字思考鏈。兩版共用相同的 ST validator、matiec 編譯器及 OpenPLC/Modbus
@@ -60,6 +61,31 @@ codex login
 開 `http://localhost:8502`。若要更換 Codex 模型，可在啟動前設定
 `PLC_ASSIST_CODEX_MODEL`；預設為 `gpt-5.6-sol`。
 
+### Qwen3.6-27B MTP 實驗版
+
+llama.cpp 與模型是大型本機產物，分別放在被 Git 排除的 `tools/` 與
+`models/`。先啟動 llama-server：
+
+```powershell
+.\setup\start_llamacpp.ps1
+```
+
+再開另一個 PowerShell 啟動介面：
+
+```powershell
+.\venv\Scripts\python.exe -m streamlit run app_llamacpp.py --server.port 8503
+```
+
+預設使用 Vulkan、8K context、單一請求，以及 Qwen3.6 原生 MTP 兩個 draft
+tokens。若要量測無 MTP 基準，可用：
+
+```powershell
+.\setup\start_llamacpp.ps1 -MtpTokens 0
+```
+
+這個版本不會取代 Ollama；llama-server 未啟動時仍可照常使用 8501 的
+Ollama 版。
+
 ## 裝 OpenPLC（完整功能要用到）
 
 前面三步裝好就能用了，但如果想要第 4、5 步的「真的編譯 + 部署到 OpenPLC 跑 Modbus」，還要多裝一套東西：MSYS2（Windows 上的編譯工具鏈）跟 OpenPLC_v3。這兩個都是原生 Windows 執行檔，不用 WSL。
@@ -101,7 +127,9 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 
 - `app.py` — 整個 Streamlit 介面，包含餵給 LLM 的 system prompt（這份 prompt 其實改了很多輪，踩過不少雷，細節寫在 `DEPLOYMENT.md`）
 - `app_codex.py` — Codex 推理版的獨立 Streamlit 入口
+- `app_llamacpp.py` — Qwen3.6-27B / llama.cpp MTP 版入口
 - `codex_provider.py` — 以唯讀、暫時 Codex CLI 工作階段生成 ST
+- `local_provider.py` — llama-server OpenAI-compatible 串流轉接器
 - `validator.py` — 純規則式的靜態檢查，沒有外部依賴，永遠能跑
 - `compiler.py` / `simulator.py` / `scenarios.py` — 真正編譯 + 模擬部署那條 pipeline
 - `motion_stubs/` — 手寫的運動控制函式方塊模擬庫（`MC_Power`、`MC_MoveAbsolute` 之類），LLM 生成的程式碼是接這一套跑的，不是自己重新發明安全邏輯
@@ -109,4 +137,4 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 
 ## 目前的狀態老實說
 
-這個 9B 的模型（本機能跑得動的大小）偶爾還是會生成語法錯的、或邏輯怪怪的程式碼，這是預期中的事，也是為什麼要有編譯這一關把關，而不是完全信任 LLM 的輸出。目前「模擬部署」那一關也只驗證了 `MC_Power` 的啟用/緊急停止回應，還沒做到「有沒有真的移動到定位」這種更細節的動作正確性驗證——這塊之後有空再補。
+這個 9B 的模型（本機能跑得動的大小）偶爾還是會生成語法錯的、或邏輯怪怪的程式碼，這是預期中的事，也是為什麼要有編譯與 runtime 情境把關，而不是完全信任 LLM 的輸出。目前模擬部署會依 JOG／Absolute 程式測試啟用、緊急停止、限位中止、Reset、JOG 放開停止，以及 Absolute 到位；它仍是簡化的虛擬軸模型，不等同實機伺服器、機構負載與安全迴路驗證。

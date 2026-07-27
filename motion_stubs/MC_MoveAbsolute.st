@@ -54,6 +54,7 @@ IF owned AND Axis.CommandId = myCommand THEN
         Axis.Error := TRUE;
         Axis.ErrorID := 1;
         Axis.AxisState := 6;
+        Axis.CommandAborted := TRUE;
         CommandAborted := TRUE;
         owned := FALSE;
     ELSIF (Axis.TargetPosition > Axis.Position AND Axis.LimitPos) OR
@@ -64,6 +65,7 @@ IF owned AND Axis.CommandId = myCommand THEN
         Axis.Error := TRUE;
         Axis.ErrorID := 2;
         Axis.AxisState := 6;
+        Axis.CommandAborted := TRUE;
         CommandAborted := TRUE;
         owned := FALSE;
     ELSE

@@ -6,4 +6,8 @@ pytest-cache-files-*/
 *.log
 .claude/
 .runlogs/
+.tmp/
+.test-tmp*/
+models/
+tools/
 JidienSyncServer_Release_V1.02.00/

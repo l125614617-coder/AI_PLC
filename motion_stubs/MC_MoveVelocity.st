@@ -27,6 +27,17 @@ IF Execute THEN
         ELSIF Axis.Busy AND Axis.CommandId <> myCommand THEN
             CommandAborted := TRUE;
             Error := TRUE;
+        ELSIF (Velocity > 0.0 AND Axis.LimitPos) OR
+              (Velocity < 0.0 AND Axis.LimitNeg) THEN
+            Axis.Velocity := 0.0;
+            Axis.Active := FALSE;
+            Axis.InVelocity := FALSE;
+            Axis.Error := TRUE;
+            Axis.ErrorID := 2;
+            Axis.AxisState := 6;
+            Axis.CommandAborted := TRUE;
+            CommandAborted := TRUE;
+            owned := FALSE;
         ELSE
             Axis.CommandId := Axis.CommandId + 1;
             myCommand := Axis.CommandId;
@@ -47,6 +58,18 @@ IF Execute THEN
             Axis.Error := TRUE;
             Axis.ErrorID := 1;
             Axis.AxisState := 6;
+            Axis.CommandAborted := TRUE;
+            CommandAborted := TRUE;
+            owned := FALSE;
+        ELSIF (Velocity > 0.0 AND Axis.LimitPos) OR
+              (Velocity < 0.0 AND Axis.LimitNeg) THEN
+            Axis.Velocity := 0.0;
+            Axis.Active := FALSE;
+            Axis.InVelocity := FALSE;
+            Axis.Error := TRUE;
+            Axis.ErrorID := 2;
+            Axis.AxisState := 6;
+            Axis.CommandAborted := TRUE;
             CommandAborted := TRUE;
             owned := FALSE;
         ELSE
@@ -79,6 +102,7 @@ IF Execute THEN
     END_IF;
 ELSE
     IF owned THEN
+        Axis.Velocity := 0.0;
         Axis.Active := FALSE;
         Axis.AxisState := 1;
         Axis.InVelocity := FALSE;
