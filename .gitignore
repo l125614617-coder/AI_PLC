@@ -1,15 +1,49 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!*.example.env
+hardware_config.env
+
+# Python virtual environments and bytecode
 venv/
+.venv/
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Python build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Tests, coverage, and static-analysis caches
 .pytest_cache/
 pytest-cache-files-*/
+.test-tmp*/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Logs and temporary runtime files
 *.log
-.claude/
 .runlogs/
 .tmp/
-.test-tmp*/
+
+# Downloaded models, tools, and generated releases
 models/
 tools/
 release/
-JidienSyncServer_Release_V1.02.00/
+JidienSyncServer_Release_*/
+
+# Local notes and assistant configuration
 note/
+.claude/
+
+# Editors and operating-system metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
