@@ -1,36 +1,28 @@
-# PLC-Assist 0.2.1
+# PLC-Assist 0.2.2
 
-Release date: 2026-07-27
+Release date: 2026-07-29
 
 ## Highlights
 
-- Fixed packaged EXE project-root discovery. A manager launched from
-  `release\PLC-Assist-0.2.1` now locates the operational project containing
-  `venv`, `models`, and `tools`.
-- Added a saved project-folder selector, dependency/login preflight checks,
-  synchronous Ready/Failed startup, actionable stderr reporting, rollback of
-  partial mode starts, and PID command-line fingerprinting.
-- GUI and CLI Service Manager for on-demand Ollama, Codex, llama.cpp,
-  Streamlit, and OpenPLC lifecycle management.
-- Windows `PLC-Assist-Service-Manager.exe` and
-  `PLC-Assist-Service-CLI.exe`.
-- Modbus holding-register observation for position, velocity, targets,
-  ErrorID, and AxisState.
-- Runtime coverage for negative JOG/negative limit, repeated start/stop,
-  direction switching, E-Stop, Reset, and absolute-position completion.
-- Non-loopback PLC targets are denied by default and require an explicit
-  real-hardware opt-in.
+- Forced UTF-8 decoding for llama.cpp SSE responses whose Content-Type omits
+  a charset, preventing mojibake in Traditional Chinese output.
+- Reassembled JSON events split across multiple SSE payload lines, including
+  splits inside strings, literals, and nested structures.
+- Added explicit errors for malformed or prematurely terminated JSON streams.
+- Retained all v0.2.1 Service Manager, runtime observation, safety-gate, and
+  packaged executable functionality.
 
 ## Verification
 
-- Packaged EXE start/ready/stop tests for Codex UI, 27B API/UI, and OpenPLC.
-- GUI startup smoke test and 36 passing pytest tests.
+- UTF-8 Traditional Chinese streaming regression test.
+- Split-string, split-literal, malformed, and incomplete JSON stream tests.
+- Full automated suite: 40 passing pytest tests.
+- Packaged CLI llama.cpp and OpenPLC simulation preflight checks passed.
 - OpenPLC/Modbus:
   - negative JOG suite: 5/5;
   - repeated commands and direction switch suite: 6/6;
   - absolute-position suite: 5/5.
-- Release CLI executable health check passed.
-- Release archive excludes models, llama.cpp binaries, logs, and local
+- Release archive excludes models, llama.cpp binaries, logs, local notes, and
   credentials.
 
 Real-machine servo behavior and safety-chain validation remain site-specific

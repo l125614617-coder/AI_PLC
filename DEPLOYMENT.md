@@ -200,10 +200,10 @@ Web 或 Modbus 指向非本機時會拒絕執行，除非明確設定
 ### 建立 Windows 發行包
 
 ```powershell
-.\setup\build_release.ps1 -Version 0.2.1
+.\setup\build_release.ps1 -Version 0.2.2
 ```
 
-輸出為 `release\PLC-Assist-0.2.1-win64.zip`，包含 GUI Service Manager、
+輸出為 `release\PLC-Assist-0.2.2-win64.zip`，包含 GUI Service Manager、
 CLI 執行檔、程式碼、設定範例與文件；大型模型、llama.cpp binaries 與
 OpenPLC 安裝不打包。
 

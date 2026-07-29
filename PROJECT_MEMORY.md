@@ -1,6 +1,6 @@
 # PLC-Assist 專案記憶
 
-最後更新：2026-07-27（Asia/Taipei）
+最後更新：2026-07-29（Asia/Taipei）
 
 ## 目前狀態
 
@@ -178,6 +178,22 @@ Streamlit 已在修改後完整重啟，健康檢查為 HTTP 200。
 - v0.2.1 發行 EXE 已完成 Codex UI、27B API/UI、OpenPLC 實機
   start/ready/stop 驗證；pytest 為 `36 passed`。
 
+### v0.2.2 llama.cpp 串流穩定性
+
+- 強制以 UTF-8 解碼 llama.cpp SSE，避免 Content-Type 未宣告 charset 時，
+  繁體中文被 `requests` 依 ISO-8859-1 解讀而產生亂碼。
+- 支援一個 JSON event 被拆成多個 SSE payload，包括字串、`null` 等
+  literal 或巢狀結構中斷的情形。
+- 不完整串流及結構已閉合但不合法的 JSON 會回報明確錯誤。
+- 新增 UTF-8、分段 JSON literal 與 malformed JSON 回歸測試；
+  pytest 現為 `40 passed`。
+- llama.cpp Qwen3.6-27B 真實 API 已驗證繁體中文串流，精確輸出
+  `繁體中文測試成功`，無亂碼或 JSON 中斷。
+- OpenPLC/Modbus 已重新實測：負向 JOG 5/5、連續命令與方向切換 6/6、
+  Absolute Position 5/5，合計 16/16。
+- 已建立 `PLC-Assist-0.2.2-win64.zip`，封裝 CLI 的 llama.cpp 與 simulation
+  preflight 均通過，ZIP 未包含模型、工具 binaries、日誌、筆記或憑證。
+
 ## 啟動方式
 
 PLC-Assist：
@@ -223,3 +239,4 @@ ollama serve
 ```
 
 - 參考資料夾 `JidienSyncServer_Release_V1.02.00` 僅供借鑑，已排除在 Git 追蹤之外。
+- `note/` 為本機操作截圖與筆記，內容可能過時或包含登入提示，已排除於 Git。

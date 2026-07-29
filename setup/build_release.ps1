@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.1"
+    [string]$Version = "0.2.2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +34,7 @@ $files = @(
     "codex_provider.py", "compiler.py", "local_provider.py", "plc_config.py",
     "scenarios.py", "simulator.py", "st_common.py", "validator.py",
     "README.md", "DEPLOYMENT.md", "RELEASE_NOTES.md",
+    "REAL_HARDWARE_CHECKLIST.md",
     "requirements.txt", "requirements-dev.txt",
     "hardware_config.example.env"
 )

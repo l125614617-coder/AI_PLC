@@ -14,6 +14,90 @@ from typing import Iterator
 import requests
 
 
+def _json_structure_open(data: str) -> bool:
+    """Return whether an object/array prefix still needs closing JSON tokens."""
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+
+    for character in data:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+
+        if character == '"':
+            in_string = True
+        elif character in "{[":
+            stack.append(character)
+        elif character in "}]":
+            if not stack:
+                return False
+            opening = stack.pop()
+            if (opening, character) not in {("{", "}"), ("[", "]")}:
+                return False
+
+    return in_string or escaped or bool(stack)
+
+
+def _iter_sse_json(lines) -> Iterator[dict]:
+    """Decode llama.cpp SSE events, including JSON split across lines.
+
+    llama-server normally emits one complete JSON object per ``data:`` line,
+    but long-running generations can occasionally expose a partial event to
+    the client. Keep incomplete JSON until the following line arrives instead
+    of terminating an otherwise healthy generation.
+    """
+    buffered = ""
+
+    for line in lines:
+        if isinstance(line, bytes):
+            line = line.decode("utf-8")
+        line = line.rstrip("\r")
+        if not line:
+            continue
+
+        if line.startswith("data:"):
+            fragment = line[5:]
+            if fragment.startswith(" "):
+                fragment = fragment[1:]
+        elif buffered:
+            # Be tolerant of a continuation that omitted the SSE ``data:``
+            # prefix. The HTTP response contains only SSE payload lines here.
+            fragment = line
+        else:
+            continue
+
+        if fragment.strip() == "[DONE]":
+            if buffered:
+                raise ValueError(
+                    "llama.cpp stream ended with an incomplete JSON event"
+                )
+            return
+
+        candidate = buffered + fragment
+        try:
+            event = json.loads(candidate)
+        except json.JSONDecodeError as error:
+            if _json_structure_open(candidate):
+                buffered = candidate
+                continue
+            raise ValueError(
+                "llama.cpp returned malformed streaming JSON"
+            ) from error
+
+        buffered = ""
+        if isinstance(event, dict):
+            yield event
+
+    if buffered:
+        raise ValueError("llama.cpp stream ended with an incomplete JSON event")
+
+
 class LlamaCppClient:
     """Stream chat completions from llama-server's OpenAI-compatible API."""
 
@@ -49,14 +133,13 @@ class LlamaCppClient:
             timeout=self.timeout,
         )
         response.raise_for_status()
+        # Some llama.cpp builds omit ``charset=utf-8`` from the SSE
+        # Content-Type. requests then falls back to ISO-8859-1 and turns
+        # Traditional Chinese into mojibake such as ``ç¸½å...``.
+        response.encoding = "utf-8"
 
-        for line in response.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data:"):
-                continue
-            data = line[5:].strip()
-            if data == "[DONE]":
-                break
-            event = json.loads(data)
+        events = _iter_sse_json(response.iter_lines(decode_unicode=True))
+        for event in events:
             choices = event.get("choices") or []
             if not choices:
                 continue
