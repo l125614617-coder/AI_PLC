@@ -4,7 +4,7 @@ PLC-Assist 是一套面向 IEC 61131-3 Structured Text（ST）的本機 AI 輔�
 
 > 核心理念：LLM 負責產生草稿，編譯器與 Runtime 測試負責建立可信邊界。生成成功不等於可部署。
 
-## 一分鐘理解
+## 架構說明
 
 PLC-Assist 解決三個問題：
 
