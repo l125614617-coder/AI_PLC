@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 from st_common import extract_pous, strip_comments
+from motion_contract import motion_command_bindings
 
 MOTION_STUBS_DIR = Path(__file__).parent / "motion_stubs"
 MOTION_STUB_FILES = [
@@ -59,12 +60,15 @@ def _load_motion_stubs() -> str:
 # finding that %IX/%IW are read-only over Modbus, so everything here is %QX.
 # 'start' drives the LLM's own required bEnable signal (see DEFAULT_SYSTEM_PROMPT
 # in app.py, which mandates this exact name) -- without it there is no generic
-# way to kick off whatever control logic the LLM wrote.
+# way to kick off whatever control logic the LLM wrote. Absolute programs with
+# plain Position/Velocity variables also receive an apply pulse plus two command
+# registers so Twin can safely re-arm and retarget the same deployed program.
 AXIS_ADAPTER_IO_MAP = {
     "busy": 0, "done": 1, "error": 2, "enabled": 3,
     "estop": 4, "limitpos": 5, "limitneg": 6, "homeswitch": 7,
     "start": 8, "active": 9, "aborted": 10, "invelocity": 11,
-    "reset": 12, "moving": 13, "reverse": 14,
+    "reset": 12, "moving": 13, "reverse": 14, "apply_target": 15,
+    "soft_limits_enable": 16, "softlimitpos": 17, "softlimitneg": 18,
 }
 AXIS_ADAPTER_REGISTER_MAP = {
     "position_x10": 0,
@@ -73,6 +77,14 @@ AXIS_ADAPTER_REGISTER_MAP = {
     "target_velocity_x10": 3,
     "error_id": 4,
     "axis_state": 5,
+}
+AXIS_ADAPTER_COMMAND_MAP = {
+    "apply_target": AXIS_ADAPTER_IO_MAP["apply_target"],
+    "command_position_x10": 6,
+    "command_velocity_x10": 7,
+    "soft_limit_negative_x10": 8,
+    "soft_limit_positive_x10": 9,
+    "soft_limits_enable": AXIS_ADAPTER_IO_MAP["soft_limits_enable"],
 }
 
 _AXIS_VAR_PATTERN = re.compile(r"(\w+)\s*:\s*AXIS_REF\s*;", re.IGNORECASE)
@@ -101,7 +113,9 @@ def _detect_axis_variable(code: str) -> str:
     return m.group(1) if m else None
 
 
-def _inject_axis_adapter(code: str, axis_var: str) -> str:
+def _inject_axis_adapter(
+    code: str, axis_var: str, command_bindings: dict | None = None
+) -> str:
     """Text-surgery: insert a located-I/O VAR block right after 'PROGRAM MAIN'
     and bridging assignments right before 'END_PROGRAM' (plus one right after
     the header, for bEnable -- see below), so the LLM's own (unmodified)
@@ -117,6 +131,13 @@ def _inject_axis_adapter(code: str, axis_var: str) -> str:
     the harness-driven value takes effect the same scan it's written -- the
     axis status/fault bridging happens at the END, after the LLM's logic has
     had a chance to update the axis for this scan."""
+    command_vars = ""
+    if command_bindings:
+        command_vars = f"""
+    AdpApplyTarget        AT %QX0.{AXIS_ADAPTER_IO_MAP['apply_target']} : BOOL;
+    AdpCommandPositionX10 AT %QW{AXIS_ADAPTER_COMMAND_MAP['command_position_x10']} : INT;
+    AdpCommandVelocityX10 AT %QW{AXIS_ADAPTER_COMMAND_MAP['command_velocity_x10']} : INT;
+"""
     var_block = f"""
 VAR
     AdpEStop      AT %QX0.{AXIS_ADAPTER_IO_MAP['estop']} : BOOL;
@@ -134,19 +155,33 @@ VAR
     AdpReset      AT %QX0.{AXIS_ADAPTER_IO_MAP['reset']} : BOOL;
     AdpMoving     AT %QX0.{AXIS_ADAPTER_IO_MAP['moving']} : BOOL;
     AdpReverse    AT %QX0.{AXIS_ADAPTER_IO_MAP['reverse']} : BOOL;
+    AdpSoftLimitsEnable AT %QX0.{AXIS_ADAPTER_IO_MAP['soft_limits_enable']} : BOOL;
+    AdpSoftLimitPos     AT %QX0.{AXIS_ADAPTER_IO_MAP['softlimitpos']} : BOOL;
+    AdpSoftLimitNeg     AT %QX0.{AXIS_ADAPTER_IO_MAP['softlimitneg']} : BOOL;
     AdpPositionX10       AT %QW0 : INT;
     AdpVelocityX10       AT %QW1 : INT;
     AdpTargetPositionX10 AT %QW2 : INT;
     AdpTargetVelocityX10 AT %QW3 : INT;
     AdpErrorID           AT %QW4 : INT;
     AdpAxisState         AT %QW5 : INT;
+    AdpSoftLimitNegativeX10 AT %QW{AXIS_ADAPTER_COMMAND_MAP['soft_limit_negative_x10']} : INT;
+    AdpSoftLimitPositiveX10 AT %QW{AXIS_ADAPTER_COMMAND_MAP['soft_limit_positive_x10']} : INT;
+{command_vars.rstrip()}
 END_VAR
 """
-    bridge_stmts = f"""
+    input_bridge = f"""
 {axis_var}.EStopActive := AdpEStop;
-{axis_var}.LimitPos := AdpLimitPos;
-{axis_var}.LimitNeg := AdpLimitNeg;
+{axis_var}.LimitPos := AdpLimitPos OR (AdpSoftLimitsEnable AND
+    ({axis_var}.Position >= INT_TO_REAL(AdpSoftLimitPositiveX10) / 10.0));
+{axis_var}.LimitNeg := AdpLimitNeg OR (AdpSoftLimitsEnable AND
+    ({axis_var}.Position <= INT_TO_REAL(AdpSoftLimitNegativeX10) / 10.0));
 {axis_var}.HomeSwitch := AdpHomeSwitch;
+"""
+    bridge_stmts = f"""
+AdpSoftLimitPos := AdpSoftLimitsEnable AND
+    ({axis_var}.Position >= INT_TO_REAL(AdpSoftLimitPositiveX10) / 10.0);
+AdpSoftLimitNeg := AdpSoftLimitsEnable AND
+    ({axis_var}.Position <= INT_TO_REAL(AdpSoftLimitNegativeX10) / 10.0);
 AdpBusy := {axis_var}.Busy;
 AdpDone := {axis_var}.Done;
 AdpError := {axis_var}.Error;
@@ -183,6 +218,20 @@ AdpAxisState := {axis_var}.AxisState;
         last_end = matches[-1].end()
         code = code[:last_end] + "\nbReverseReq := AdpReverse;" + code[last_end:]
 
+    matches = list(_END_VAR_PATTERN.finditer(code))
+    last_end = matches[-1].end()
+    code = code[:last_end] + input_bridge + code[last_end:]
+
+    if command_bindings:
+        matches = list(_END_VAR_PATTERN.finditer(code))
+        last_end = matches[-1].end()
+        target_bridge = f"""
+IF AdpApplyTarget THEN
+    {command_bindings['position_variable']} := INT_TO_REAL(AdpCommandPositionX10) / 10.0;
+    {command_bindings['velocity_variable']} := INT_TO_REAL(AdpCommandVelocityX10) / 10.0;
+END_IF;"""
+        code = code[:last_end] + target_bridge + code[last_end:]
+
     code = _END_PROGRAM_PATTERN.sub(lambda m: bridge_stmts + m.group(0), code, count=1)
     return code
 
@@ -217,6 +266,7 @@ def _build_source(code: str) -> tuple:
 
     wrapper_source = ""
     axis_io_map = None
+    axis_command_map = None
     if program_pous:
         main_name = program_pous[0]["name"]
         # Only attempt adapter injection against the LLM's own PROGRAM (not the
@@ -224,8 +274,11 @@ def _build_source(code: str) -> tuple:
         # why this needs to operate on the actual POU body.
         axis_var = _detect_axis_variable(code)
         if axis_var:
-            code = _inject_axis_adapter(code, axis_var)
+            bindings = motion_command_bindings(code)
+            code = _inject_axis_adapter(code, axis_var, bindings)
             axis_io_map = dict(AXIS_ADAPTER_IO_MAP)
+            if bindings:
+                axis_command_map = dict(AXIS_ADAPTER_COMMAND_MAP)
     elif pous:
         main_name = "MAIN"
         wrapper_source = _synthesize_wrapper(pous[0]["name"])
@@ -252,7 +305,15 @@ END_CONFIGURATION
         parts.append(config)
     full_source = "\n".join(parts)
 
-    return full_source, code_start_line, code_end_line, wrapper_source, main_name, axis_io_map
+    return (
+        full_source,
+        code_start_line,
+        code_end_line,
+        wrapper_source,
+        main_name,
+        axis_io_map,
+        axis_command_map,
+    )
 
 
 def _parse_issues(compiler_output: str, code_start_line: int, code_end_line: int) -> list:
@@ -275,7 +336,7 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
     bridge into another OS).
 
     Returns {status, stdout, stderr, issues, wrapper_source, axis_io_map,
-    axis_register_map, full_source}
+    axis_register_map, axis_command_map, full_source}
     where status is one of:
     'compiled' | 'compile_failed' | 'wrapper_synthesis_failed' | 'iec2c_unavailable'.
     `axis_io_map` and `axis_register_map` are fixed Modbus mappings when an
@@ -290,7 +351,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
             "stdout": "", "stderr": "",
             "issues": [{"severity": "error", "message": "No code to compile.", "line": None, "in_generated_code": False}],
             "wrapper_source": "", "axis_io_map": None,
-            "axis_register_map": None, "full_source": "",
+            "axis_register_map": None, "axis_command_map": None,
+            "full_source": "",
         }
 
     if not iec2c_available():
@@ -299,10 +361,19 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
             "stdout": "", "stderr": "",
             "issues": [{"severity": "error", "message": f"iec2c.exe not found at {IEC2C_EXE} -- cannot run the compile check.", "line": None, "in_generated_code": False}],
             "wrapper_source": "", "axis_io_map": None,
-            "axis_register_map": None, "full_source": "",
+            "axis_register_map": None, "axis_command_map": None,
+            "full_source": "",
         }
 
-    full_source, code_start_line, code_end_line, wrapper_source, main_name, axis_io_map = _build_source(code)
+    (
+        full_source,
+        code_start_line,
+        code_end_line,
+        wrapper_source,
+        main_name,
+        axis_io_map,
+        axis_command_map,
+    ) = _build_source(code)
 
     if main_name is None:
         return {
@@ -312,7 +383,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
                         "message": "Could not find any PROGRAM/FUNCTION_BLOCK/FUNCTION declaration in the generated ST code.",
                         "line": None, "in_generated_code": False}],
             "wrapper_source": "", "axis_io_map": None,
-            "axis_register_map": None, "full_source": "",
+            "axis_register_map": None, "axis_command_map": None,
+            "full_source": "",
         }
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="plcassist_compile_"))
@@ -330,7 +402,8 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
                 "stdout": "", "stderr": str(e),
                 "issues": [{"severity": "error", "message": f"Compile invocation failed: {e}", "line": None, "in_generated_code": False}],
                 "wrapper_source": wrapper_source, "axis_io_map": None,
-                "axis_register_map": None, "full_source": full_source,
+                "axis_register_map": None, "axis_command_map": None,
+                "full_source": full_source,
             }
 
         combined_output = result.stdout + result.stderr
@@ -349,6 +422,7 @@ def compile_st_code(code: str, timeout_s: int = 30) -> dict:
                 if axis_io_map is not None and not has_errors
                 else None
             ),
+            "axis_command_map": axis_command_map if not has_errors else None,
             "full_source": full_source,
         }
     finally:

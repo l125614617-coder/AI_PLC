@@ -29,6 +29,17 @@ def test_absolute_scenarios_include_completion_but_not_jog_release():
     ]
 
 
+def test_absolute_timeout_scales_with_validated_distance_and_velocity():
+    scenarios = scenarios_for_code(
+        "MC_Power MC_MoveAbsolute",
+        contract={"observed_position": 1000.0, "observed_velocity": 200.0},
+    )
+    absolute = next(s for s in scenarios if s["name"] == "absolute_reaches_target")
+
+    assert absolute["steps"][0]["poll_until_s"] == 14.5
+    assert "wait_s" not in absolute["steps"][0]
+
+
 def test_negative_jog_uses_negative_limit_scenario():
     names = _names("rVelocity : REAL := -1500.0; MC_MoveVelocity")
 

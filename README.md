@@ -7,6 +7,7 @@
 | Ollama 本地版 | `http://localhost:8501` | 本機 `qwen3.5:9b` |
 | Codex 推理版 | `http://localhost:8502` | 已登入的 Codex CLI，預設 `gpt-5.6-sol` |
 | llama.cpp MTP 版 | `http://localhost:8503` | 本機 `Qwen3.6-27B Q3_K_M` |
+| 2D Digital Twin | `http://localhost:8504` | OpenPLC / Modbus 虛擬軸 |
 
 Codex 版顯示安全的推理摘要、進度與 token 使用量，不顯示或偽造模型的私有
 逐字思考鏈。兩版共用相同的 ST validator、matiec 編譯器及 OpenPLC/Modbus
@@ -104,6 +105,54 @@ tokens。若要量測無 MTP 基準，可用：
 這個版本不會取代 Ollama；llama-server 未啟動時仍可照常使用 8501 的
 Ollama 版。
 
+### 2D Digital Twin
+
+先在任一生成介面執行 `Compile + Simulate`。只有本次 ST 的所有 Runtime
+情境都通過時，結果區才會開放「部署至 2D Twin」；按下後系統會重新部署
+同一份編譯程式並保持 OpenPLC Runtime 運行，再按「開啟 2D Twin」。程式
+來源以 SHA-256 雜湊核對，重新生成 ST 後不能誤用上一份驗證結果。
+另外會比對 UI 需求與生成 ST 實際使用的 `MC_MoveAbsolute`／
+`MC_MoveVelocity`、Position、Velocity 與 JOG 方向；模式或數值不符時不會
+執行 Runtime，也不能部署至 Twin。
+
+也可以單獨啟動 Twin 畫面：
+
+```powershell
+.\venv\Scripts\python.exe -m streamlit run twin_app.py --server.port 8504
+```
+
+開啟 `http://localhost:8504`，有效部署身分會顯示在畫面頂端；若沒有由
+PLC-Assist 持續部署的 Runtime，控制按鈕會停用。部署成功後即可透過 Modbus
+啟動／停止、切換方向、Reset
+及注入模擬 E-Stop，並每 0.5 秒查看位置、速度、目標值、Axis State、Error ID
+與 2D 滑台位置。也可以由 Service Manager 執行 `start twin`，同時啟動
+OpenPLC 與 Twin UI。Twin 預設只接受 loopback PLC；遠端設備仍受
+`PLC_ASSIST_ALLOW_REAL_HARDWARE` 安全閘保護。
+Twin 左側的「顯示範圍」只控制動畫尺規，位置、目標或限位超界時會自動
+擴展；「模擬軟限位」則是另一組設定。Limit -／Limit + 會保存於
+`.runlogs/twin-settings.json`，並透過 Modbus 寫入 Adapter，由 PLC 每個掃描
+週期比較 Axis Position。目標超界會在 Twin 送出前被拒絕，到達限位時則由
+PLC 觸發對應 Limit 與運動中止。這仍是模擬功能，不能取代實機限位開關與
+安全迴路。
+Absolute Runtime 驗證不再固定等待 1.5 秒，而會依 Position／Velocity 計算
+等待上限並輪詢 Done，因此慢速長距離定位不會被過早判定失敗。
+
+若 Absolute 程式以變數傳入 `MC_MoveAbsolute` 的 Position 與 Velocity，
+Compiler 會額外注入互動命令 adapter。Twin 會顯示「新目標位置」「移動速度」
+與「移動至目標」；每次命令會自動解除舊 Execute、透過 Modbus 套用新值，
+再產生新的上升沿，因此不需重新生成或部署即可連續定位，例如
+`1000 → 500 → -300`。目前命令採 16-bit、0.1 單位縮放，可用範圍為
+`-3276.8～3276.7`，E-Stop 或 ErrorStop 時會拒絕新命令。
+互動位置與速度使用獨立的 Streamlit form/fragment，編輯數值時不觸發頁面
+更新，按「移動至目標」後也只局部更新命令區，避免輸入失焦與按鈕造成連續
+兩次重畫。
+
+以真實本機 OpenPLC／Modbus 執行 Twin 啟停 smoke test：
+
+```powershell
+.\venv\Scripts\python.exe setup\smoke_twin.py
+```
+
 ## 裝 OpenPLC（完整功能要用到）
 
 前面三步裝好就能用了，但如果想要第 4、5 步的「真的編譯 + 部署到 OpenPLC 跑 Modbus」，還要多裝一套東西：MSYS2（Windows 上的編譯工具鏈）跟 OpenPLC_v3。這兩個都是原生 Windows 執行檔，不用 WSL。
@@ -132,7 +181,8 @@ C:\msys64\usr\bin\bash.exe -lc "cd ~/OpenPLC_v3/webserver && ~/OpenPLC_v3/.venv/
 
 這個會佔住終端機，開一個新視窗跑或丟到背景執行都行。OpenPLC 網頁介面預設帳密是 `openplc` / `openplc`（寫死在 `simulator.py` 裡，改密碼記得同步改那邊）。
 
-如果 8080 已被其他軟體占用，可改用 8081：
+PLC-Assist Service Manager 預設使用 OpenPLC `8081`；若以 OpenPLC 原生方式
+獨立啟動且使用 `8080`，請明確設定 `OPENPLC_WEB_BASE`。例如：
 
 ```powershell
 $env:OPENPLC_WEB_BASE = "http://localhost:8081"
@@ -149,6 +199,8 @@ C:\msys64\usr\bin\bash.exe -lc "OPENPLC_WEB_PORT=8081 /d/AI_PLC/setup/start_open
 - `codex_provider.py` — 以唯讀、暫時 Codex CLI 工作階段生成 ST
 - `local_provider.py` — llama-server OpenAI-compatible 串流轉接器
 - `service_manager.py` — 按需啟停服務的 GUI／CLI 管理器
+- `twin_app.py` / `twin_client.py` — 2D 虛擬軸畫面與 Modbus Twin 控制層
+- `twin_deployment.py` — 持續部署、程式身分與 Runtime 生命週期
 - `plc_config.py` — OpenPLC/Modbus 設定與遠端硬體安全閘
 - `validator.py` — 純規則式的靜態檢查，沒有外部依賴，永遠能跑
 - `compiler.py` / `simulator.py` / `scenarios.py` — 真正編譯 + 模擬部署那條 pipeline

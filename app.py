@@ -1,20 +1,32 @@
 import os
 import re
+import hashlib
 
 import streamlit as st
 from ollama import Client
 
 # 匯入輕量本地驗證引擎
 from validator import validate_st_code
+from prompt_contract import authoritative_user_prompt, prompt_control_conflicts
 
 # 匯入編譯檢查 (matiec) 與模擬部署 (OpenPLC + Modbus) 引擎 -- 選用，缺少工具鏈時優雅降級
 try:
     from compiler import compile_st_code, iec2c_available
     from simulator import run_all_scenarios, openplc_available
     from scenarios import scenarios_for_code
+    from motion_contract import validate_motion_contract
+    from twin_deployment import (
+        deploy_to_twin,
+        load_deployment,
+        stop_twin,
+    )
     _SIMULATION_IMPORT_ERROR = None
 except Exception as _e:  # 例如缺少 pymodbus/requests，或路徑尚未設定好
     _SIMULATION_IMPORT_ERROR = str(_e)
+    deploy_to_twin = None
+    load_deployment = None
+    stop_twin = None
+    validate_motion_contract = None
 
 # ==========================================
 # 1. 基礎設定與快取連線
@@ -367,7 +379,7 @@ def ask_ai_plc_assistant(system_prompt: str, user_prompt: str, think: bool = Tru
 # ==========================================
 # 4.5 編譯檢查 + 模擬部署 (選用，較慢，需點擊觸發)
 # ==========================================
-def run_compile_and_simulate(code: str) -> dict:
+def run_compile_and_simulate(code: str, expected_control: dict | None = None) -> dict:
     """Stage 2 (matiec 真實編譯檢查) + Stages 3-5 (部署到 OpenPLC 並跑 Modbus 情境測試)。
     與 validate_st_code 不同，這裡會啟動外部程序、耗時 15-45 秒，因此只在使用者主動點擊時執行。
 
@@ -376,7 +388,16 @@ def run_compile_and_simulate(code: str) -> dict:
     讓底下的情境測試可以不管 LLM 這次取了什麼變數名稱，直接驅動並觀察它的實際行為。
     如果這次生成的程式碼沒有照規範宣告 AXIS_REF 變數 (compile['axis_io_map'] 會是 None)，
     就沒有東西可以這樣接，只能停在「有沒有編過」，不會嘗試部署模擬。"""
-    result = {"compile": None, "scenarios": None}
+    result = {
+        "compile": None,
+        "scenarios": None,
+        "source_hash": hashlib.sha256((code or "").encode("utf-8")).hexdigest(),
+        "contract": (
+            validate_motion_contract(code, expected_control)
+            if validate_motion_contract
+            else {"status": "unavailable", "issues": []}
+        ),
+    }
 
     if _SIMULATION_IMPORT_ERROR:
         result["compile"] = {
@@ -403,6 +424,10 @@ def run_compile_and_simulate(code: str) -> dict:
     if result["compile"]["status"] != "compiled":
         return result  # 編不過就不用浪費時間部署了
 
+    if result["contract"].get("status") == "failed":
+        result["scenarios"] = {"status": "contract_failed"}
+        return result
+
     axis_io_map = result["compile"].get("axis_io_map")
     if axis_io_map is None:
         result["scenarios"] = {"status": "no_axis_interface"}
@@ -414,7 +439,7 @@ def run_compile_and_simulate(code: str) -> dict:
 
     try:
         full_source = result["compile"]["full_source"]
-        selected_scenarios = scenarios_for_code(code)
+        selected_scenarios = scenarios_for_code(code, contract=result["contract"])
         result["scenarios"] = {
             "status": "ran",
             "results": run_all_scenarios(
@@ -470,6 +495,14 @@ with col1:
         key="user_prompt",
         height=220,
     )
+    prompt_conflicts = prompt_control_conflicts(
+        st.session_state.get("user_prompt", ""), ui_puzzle_data
+    )
+    if prompt_conflicts:
+        st.error(
+            "控制參數與 User Prompt 不一致，請按「依上方參數重建範本」或修正下列內容：\n\n- "
+            + "\n- ".join(prompt_conflicts)
+        )
 
     # ---- System Prompt：可於進階區編輯 ----
     with st.expander("⚙️ 進階：System Prompt (角色與輸出格式設定)"):
@@ -498,13 +531,29 @@ with col1:
         "⏳ 生成中..." if is_generating else "🚀 Generate ST Code",
         type="primary",
         use_container_width=True,
-        disabled=is_generating,
+        disabled=is_generating or bool(prompt_conflicts),
     ):
+        # Snapshot the exact controls and prompt together. Subsequent widget
+        # reruns must not change the contract belonging to this generation.
+        pending_control = dict(ui_puzzle_data)
+        st.session_state["pending_control"] = pending_control
+        st.session_state["pending_user_prompt"] = authoritative_user_prompt(
+            st.session_state.get("user_prompt", ""), pending_control
+        )
         st.session_state["generating"] = True
         st.rerun()
 
 with col2:
     if st.session_state.get("generating", False):
+        generation_control = dict(
+            st.session_state.get("pending_control", ui_puzzle_data)
+        )
+        generation_prompt = st.session_state.get(
+            "pending_user_prompt",
+            authoritative_user_prompt(
+                st.session_state.get("user_prompt", ""), generation_control
+            ),
+        )
         # 即時串流顯示區
         think_area = None
         answer_area = None
@@ -517,15 +566,24 @@ with col2:
             "模型思考中..." if show_thinking else "快速生成 ST Code..."
         )
         with st.spinner(spinner_msg):
-            st.session_state["plc_data"] = ask_ai_plc_assistant(
+            generated_data = ask_ai_plc_assistant(
                 st.session_state.get("system_prompt", DEFAULT_SYSTEM_PROMPT),
-                st.session_state.get("user_prompt", ""),
+                generation_prompt,
                 think=show_thinking,
                 think_area=think_area,
                 answer_area=answer_area,
             )
+            generated_data["requested_mode"] = generation_control.get("mode", "Unknown")
+            generated_data["requested_control"] = generation_control
+            st.session_state["plc_data"] = generated_data
             st.session_state["generated"] = True
+            # A compile result belongs to exactly one generated source. Never
+            # offer a previous program for Twin deployment after regeneration.
+            st.session_state.pop("sim_result", None)
+            st.session_state.pop("twin_deploy_result", None)
         st.session_state["generating"] = False
+        st.session_state.pop("pending_control", None)
+        st.session_state.pop("pending_user_prompt", None)
         st.rerun()
 
     if st.session_state.get("generated", False):
@@ -609,18 +667,29 @@ with col2:
 
             if is_simulating:
                 with st.spinner("編譯並部署到 OpenPLC 模擬中，可能需要 15-45 秒..."):
-                    st.session_state["sim_result"] = run_compile_and_simulate(plc_data.get("code", ""))
+                    st.session_state["sim_result"] = run_compile_and_simulate(
+                        plc_data.get("code", ""),
+                        plc_data.get("requested_control"),
+                    )
                 st.session_state["simulating"] = False
                 st.rerun()
 
             if "sim_result" in st.session_state:
                 sim_result = st.session_state["sim_result"]
+                current_source_hash = hashlib.sha256(
+                    plc_data.get("code", "").encode("utf-8")
+                ).hexdigest()
+                result_is_current = sim_result.get("source_hash") == current_source_hash
+
+                if not result_is_current:
+                    st.warning("目前驗證結果屬於上一份 ST，請重新執行 Compile + Simulate。")
 
                 # --- 1.5a 編譯檢查 (matiec) ---
                 st.markdown("#### 🛠️ Compile Check (matiec)")
                 compile_result = sim_result.get("compile") or {}
                 compile_status = compile_result.get("status")
                 compile_issues = compile_result.get("issues", [])
+                contract_result = sim_result.get("contract") or {}
 
                 if compile_status == "compiled":
                     st.success("matiec 編譯通過，未發現語法/型別錯誤。")
@@ -644,11 +713,35 @@ with col2:
                             else:
                                 st.info(msg)
 
+                st.markdown("#### 🎯 Motion Request Contract")
+                if contract_result.get("status") == "passed":
+                    contract_summary = (
+                        f"生成程式符合需求模式：{contract_result.get('actual_mode')}"
+                    )
+                    if contract_result.get("observed_position") is not None:
+                        contract_summary += (
+                            f"｜Position={contract_result['observed_position']:g}"
+                        )
+                    if contract_result.get("observed_velocity") is not None:
+                        contract_summary += (
+                            f"｜Velocity={contract_result['observed_velocity']:g}"
+                        )
+                    st.success(contract_summary)
+                elif contract_result.get("status") == "failed":
+                    st.error(
+                        f"需求模式為 {contract_result.get('expected_mode')}，"
+                        f"實際生成為 {contract_result.get('actual_mode')}；已阻止 Runtime 與 Twin 部署。"
+                    )
+                    for issue in contract_result.get("issues", []):
+                        st.error(f"{issue['code']}: {issue['message']}")
+                else:
+                    st.warning("本次沒有可用的運動需求契約，無法部署至 Twin。")
+
                 # --- 1.5b 模擬部署 (OpenPLC + Modbus) ---
                 st.markdown("#### 🧪 Runtime Simulation (OpenPLC + Modbus)")
                 st.caption("部署的就是這次生成的程式碼本身 (自動偵測其中的 AXIS_REF 變數與 bEnable 訊號並接上 Modbus)，"
-                           "不是固定的參考程式——但只驗證 MC_Power 的啟用/緊急停止回應，這是不管生成的程式用哪個"
-                           "運動控制函式方塊都通用的行為；更細節的動作正確性 (例如有沒有真的移動到定位) 目前還沒涵蓋。")
+                           "不是固定的參考程式。系統會依實際運動模式驗證啟用、E-Stop、限位、Reset、JOG 啟停或"
+                           "Absolute 到位；定位測試會依已驗證的距離與速度計算等待上限並輪詢完成狀態。")
                 scenarios_result = sim_result.get("scenarios")
 
                 if scenarios_result is None:
@@ -657,6 +750,8 @@ with col2:
                     st.warning("這次生成的程式碼沒有照規範宣告 AXIS_REF 變數，找不到東西可以接上 Modbus 觀察，已略過模擬部署階段。")
                 elif scenarios_result.get("status") == "openplc_unavailable":
                     st.warning("OpenPLC 模擬環境不可用，已略過此階段。")
+                elif scenarios_result.get("status") == "contract_failed":
+                    st.error("生成程式不符合 UI 運動需求，已略過 OpenPLC Runtime 測試。")
                 elif scenarios_result.get("status") == "error":
                     st.error(f"模擬部署發生錯誤：{scenarios_result.get('message', '')}")
                 else:
@@ -670,6 +765,89 @@ with col2:
                                 st.error(run["error"])
                             for step in run.get("steps", []):
                                 st.write(("✅" if step["ok"] else "❌"), "expected:", step["expected"], "| actual:", step["actual"])
+
+                scenario_runs = (
+                    scenarios_result.get("results", [])
+                    if scenarios_result and scenarios_result.get("status") == "ran"
+                    else []
+                )
+                ready_for_twin = (
+                    result_is_current
+                    and compile_status == "compiled"
+                    and contract_result.get("status") == "passed"
+                    and compile_result.get("axis_io_map") is not None
+                    and bool(scenario_runs)
+                    and all(run.get("passed") for run in scenario_runs)
+                )
+
+                st.markdown("#### 🖥️ Deploy to 2D Digital Twin")
+                st.caption(
+                    "只有本次 ST 的所有 Runtime 情境通過後才能持續部署。"
+                    "部署後 OpenPLC Runtime 會保持運行，供 Twin 互動操作。"
+                )
+                twin_info = load_deployment() if load_deployment else None
+                deployed_current = bool(
+                    twin_info
+                    and twin_info.get("status") == "running"
+                    and twin_info.get("source_hash") == current_source_hash
+                )
+
+                is_deploying_twin = st.session_state.get("deploying_twin", False)
+                twin_cols = st.columns(3)
+                if twin_cols[0].button(
+                    "⏳ 部署中..." if is_deploying_twin else "🚀 部署至 2D Twin",
+                    type="primary",
+                    disabled=(
+                        not ready_for_twin
+                        or is_deploying_twin
+                        or deploy_to_twin is None
+                    ),
+                    use_container_width=True,
+                ):
+                    st.session_state["deploying_twin"] = True
+                    st.rerun()
+
+                if is_deploying_twin:
+                    with st.spinner("正在重新部署並保持 OpenPLC Runtime 運行..."):
+                        st.session_state["twin_deploy_result"] = deploy_to_twin(
+                            compile_result.get("full_source", ""),
+                            plc_data.get("code", ""),
+                            contract_result.get("actual_mode", "Unknown"),
+                            contract=contract_result,
+                            command_map=compile_result.get("axis_command_map"),
+                        )
+                    st.session_state["deploying_twin"] = False
+                    st.rerun()
+
+                if twin_cols[1].button(
+                    "⏹️ 停止 Twin Runtime",
+                    disabled=not twin_info or twin_info.get("status") != "running",
+                    use_container_width=True,
+                ):
+                    st.session_state["twin_deploy_result"] = stop_twin()
+                    st.rerun()
+
+                twin_cols[2].link_button(
+                    "↗️ 開啟 2D Twin",
+                    "http://localhost:8504",
+                    disabled=not deployed_current,
+                    use_container_width=True,
+                )
+
+                deploy_result = st.session_state.get("twin_deploy_result")
+                if deploy_result:
+                    if deploy_result.get("status") == "running":
+                        st.success(
+                            f"Twin Runtime 已部署：{deploy_result.get('program_name')}｜"
+                            f"模式：{deploy_result.get('mode')}"
+                        )
+                    elif deploy_result.get("status") == "stopped":
+                        st.info("Twin Runtime 已停止。")
+                    else:
+                        st.error(
+                            "Twin 部署失敗："
+                            f"{deploy_result.get('message', deploy_result.get('status', 'unknown'))}"
+                        )
 
             st.markdown("---")
 

@@ -157,12 +157,30 @@ C:\msys64\usr\bin\bash.exe -lc "cd ~/OpenPLC_v3/webserver && ~/OpenPLC_v3/.venv/
 
 這會佔用終端機前景執行，建議另開一個視窗，或用 `nohup ... &` 丟到背景。OpenPLC 網頁介面的預設帳密是 `openplc` / `openplc`（`simulator.py` 裡寫死這組帳密去自動登入，如果你在 OpenPLC 的 `users` 頁面改過密碼，記得同步更新 `simulator.py` 的 `WEB_PASSWORD`）。
 
+自動情境測試會在每個案例結束後停止測試 Runtime，避免案例之間互相污染。
+全部案例通過後，可在結果區按「部署至 2D Twin」，系統會再次部署同一份
+編譯程式並保持 Runtime 運行。部署身分保存在
+`.runlogs/twin-deployment.json`；Twin UI 只在狀態為 `running` 時開放控制。
+在 Runtime 之前，`motion_contract.py` 會核對生成程式的運動函式方塊與 UI
+需求，並解析 Position、Velocity 常數；例如 Absolute Position 需求若生成
+`MC_MoveVelocity`，會以 `MOTION_MODE_MISMATCH` 阻擋，不會把有效的 JOG
+行為誤判為符合定位需求。
+Absolute 到位案例會依已解析的距離與速度估算完成時間（最多等待 30 秒），
+並輪詢 Done、Position、TargetPosition 與 Velocity，而非使用固定延遲。
+
+對單一 `MC_MoveAbsolute` 且 Position／Velocity 都是一般變數的程式，Compiler
+會注入 `%QW6` command position、`%QW7` command velocity 與 `%QX0.15`
+apply pulse。Twin 的「移動至目標」會先將 start 清為 FALSE，等待 PLC scan，
+寫入兩個 command registers、脈衝 apply，再重新將 start 設為 TRUE，確保
+MC_MoveAbsolute 收到新的 Execute 上升沿。Literal 或計算式參數仍可正常驗證，
+但不開放互動修改，避免文字改寫或不明確的變數覆蓋。
+
 三個服務都要跑：Ollama（11434）、OpenPLC webserver（預設 8080 + Modbus 502）、Streamlit（8501）。
 
 ## 5. Port 一覽表
 
-OpenPLC Web UI 預設使用 `8080`。若該連接埠已被其他服務占用，可在啟動
-PLC-Assist 前設定 `OPENPLC_WEB_BASE`，例如：
+PLC-Assist Service Manager 預設使用 OpenPLC `8081`。若採用其他連接埠，需在
+啟動 PLC-Assist 前設定相同的 `OPENPLC_WEB_BASE`，例如：
 
 ```powershell
 $env:OPENPLC_WEB_BASE = "http://localhost:8081"

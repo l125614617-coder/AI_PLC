@@ -14,6 +14,7 @@ fixed coil addresses; `set` may be omitted on the first (pure-assert) step.
 """
 
 import re
+from copy import deepcopy
 
 SCENARIO_ENABLE_RESPONDS = {
     "name": "enable_responds",
@@ -124,7 +125,8 @@ SCENARIO_ABSOLUTE_REACHES_TARGET = {
     "steps": [
         {
             "set": {"start": True},
-            "wait_s": 1.5,
+            "poll_until_s": 15.0,
+            "poll_interval_s": 0.1,
             "assert": {"done": True, "moving": False},
             "assert_register": {
                 "position_x10": {"equals_register": "target_position_x10"},
@@ -151,7 +153,23 @@ ALL_SCENARIOS = [
 ]
 
 
-def scenarios_for_code(code: str) -> list:
+def _absolute_scenario(contract: dict | None) -> dict:
+    scenario = deepcopy(SCENARIO_ABSOLUTE_REACHES_TARGET)
+    if not contract:
+        return scenario
+    position = contract.get("observed_position")
+    velocity = contract.get("observed_velocity")
+    if position is None or velocity is None or abs(float(velocity)) < 1e-9:
+        return scenario
+    # The virtual FB integrates with a 0.01 s model step while OpenPLC runs a
+    # 20 ms task, so wall time is about 2 * distance / velocity. Add margin for
+    # startup/HTTP scheduling and cap pathological requests at 30 seconds.
+    estimated = 2.5 * abs(float(position)) / abs(float(velocity)) + 2.0
+    scenario["steps"][0]["poll_until_s"] = min(30.0, max(2.0, estimated))
+    return scenario
+
+
+def scenarios_for_code(code: str, contract: dict | None = None) -> list:
     """Return only scenarios whose behavioral contract is present in `code`."""
     selected = list(ALL_SCENARIOS)
     upper = (code or "").upper()
@@ -170,7 +188,7 @@ def scenarios_for_code(code: str) -> list:
         if "BREVERSEREQ" in upper:
             selected.append(SCENARIO_DIRECTION_SWITCH)
     if "MC_MOVEABSOLUTE" in upper:
-        selected.extend([SCENARIO_LIMIT_ABORTS_MOTION, SCENARIO_ABSOLUTE_REACHES_TARGET])
+        selected.extend([SCENARIO_LIMIT_ABORTS_MOTION, _absolute_scenario(contract)])
     if "MC_RESET" in upper and "BRESETREQ" in upper:
         selected.append(SCENARIO_RESET_CLEARS_ERROR)
     return selected

@@ -53,7 +53,7 @@ def load_plc_connection() -> PlcConnection:
     return PlcConnection(
         web_base=os.environ.get(
             "OPENPLC_WEB_BASE",
-            "http://127.0.0.1:8080",
+            "http://127.0.0.1:8081",
         ).rstrip("/"),
         modbus_host=os.environ.get("OPENPLC_MODBUS_HOST", "127.0.0.1"),
         modbus_port=int(os.environ.get("OPENPLC_MODBUS_PORT", "502")),

@@ -142,6 +142,50 @@ def _register_matches(actual: int, expected, registers: dict | None = None) -> b
     )
 
 
+def _read_expectations(
+    client, io_map, n_coils, expected, expected_registers, register_map
+):
+    ok = True
+    actual = {}
+    rr = client.read_coils(0, n_coils)
+    if rr.isError():
+        ok = False
+        actual["coils_error"] = f"Modbus read error: {rr}"
+    else:
+        actual["coils"] = {
+            sig: rr.bits[idx]
+            for sig, idx in io_map.items()
+            if sig in expected
+        }
+        ok = ok and all(actual["coils"][sig] == value for sig, value in expected.items())
+
+    if expected_registers:
+        if not register_map:
+            ok = False
+            actual["registers_error"] = "No register map available"
+        else:
+            n_registers = max(register_map.values()) + 1
+            registers = client.read_holding_registers(0, n_registers)
+            if registers.isError():
+                ok = False
+                actual["registers_error"] = f"Modbus read error: {registers}"
+            else:
+                all_registers = {
+                    sig: _signed_register(registers.registers[idx])
+                    for sig, idx in register_map.items()
+                }
+                actual["registers"] = {
+                    sig: all_registers[sig] for sig in expected_registers
+                }
+                ok = ok and all(
+                    _register_matches(
+                        actual["registers"][sig], expectation, all_registers
+                    )
+                    for sig, expectation in expected_registers.items()
+                )
+    return ok, actual
+
+
 def run_scenario(
     scenario: dict,
     io_map: dict,
@@ -181,49 +225,20 @@ def run_scenario(
             expected = step.get("assert", {})
             expected_registers = step.get("assert_register", {})
             if expected or expected_registers:
-                ok = True
-                actual = {}
-                rr = client.read_coils(0, n_coils)
-                if rr.isError():
-                    ok = False
-                    actual["coils_error"] = f"Modbus read error: {rr}"
-                else:
-                    actual["coils"] = {
-                        sig: rr.bits[idx]
-                        for sig, idx in io_map.items()
-                        if sig in expected
-                    }
-                    ok = ok and all(
-                        actual["coils"][sig] == value
-                        for sig, value in expected.items()
+                poll_until_s = float(step.get("poll_until_s", 0))
+                deadline = time.monotonic() + poll_until_s
+                while True:
+                    ok, actual = _read_expectations(
+                        client,
+                        io_map,
+                        n_coils,
+                        expected,
+                        expected_registers,
+                        register_map,
                     )
-
-                if expected_registers:
-                    if not register_map:
-                        ok = False
-                        actual["registers_error"] = "No register map available"
-                    else:
-                        n_registers = max(register_map.values()) + 1
-                        registers = client.read_holding_registers(0, n_registers)
-                        if registers.isError():
-                            ok = False
-                            actual["registers_error"] = f"Modbus read error: {registers}"
-                        else:
-                            all_registers = {
-                                sig: _signed_register(registers.registers[idx])
-                                for sig, idx in register_map.items()
-                            }
-                            actual["registers"] = {
-                                sig: all_registers[sig] for sig in expected_registers
-                            }
-                            ok = ok and all(
-                                _register_matches(
-                                    actual["registers"][sig],
-                                    expectation,
-                                    all_registers,
-                                )
-                                for sig, expectation in expected_registers.items()
-                            )
+                    if ok or poll_until_s <= 0 or time.monotonic() >= deadline:
+                        break
+                    time.sleep(float(step.get("poll_interval_s", 0.1)))
 
                 all_ok = all_ok and ok
                 result["steps"].append({
@@ -231,6 +246,7 @@ def run_scenario(
                     "expected": expected,
                     "expected_registers": expected_registers,
                     "actual": actual,
+                    "poll_timeout_s": poll_until_s or None,
                 })
 
         result["passed"] = all_ok

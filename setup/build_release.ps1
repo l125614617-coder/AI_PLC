@@ -33,6 +33,8 @@ $files = @(
     "app.py", "app_codex.py", "app_llamacpp.py", "benchmark_local_models.py",
     "codex_provider.py", "compiler.py", "local_provider.py", "plc_config.py",
     "scenarios.py", "simulator.py", "st_common.py", "validator.py",
+    "motion_contract.py",
+    "twin_app.py", "twin_client.py", "twin_deployment.py", "twin_settings.py",
     "README.md", "DEPLOYMENT.md", "RELEASE_NOTES.md",
     "REAL_HARDWARE_CHECKLIST.md",
     "requirements.txt", "requirements-dev.txt",
@@ -45,7 +47,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "motion_stubs") -Destination $pac
 New-Item -ItemType Directory -Path (Join-Path $packageDir "setup") -Force | Out-Null
 foreach ($relative in @(
     "build_release.ps1", "run_openplc.py", "setup_windows_toolchain.ps1",
-    "start_llamacpp.ps1", "start_openplc.sh"
+    "start_llamacpp.ps1", "start_openplc.sh", "smoke_twin.py"
 )) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $relative) -Destination (Join-Path $packageDir "setup") -Force
 }

@@ -10,6 +10,7 @@ import pytest
 
 from compiler import (
     AXIS_ADAPTER_IO_MAP,
+    AXIS_ADAPTER_COMMAND_MAP,
     AXIS_ADAPTER_REGISTER_MAP,
     _detect_axis_variable,
     compile_st_code,
@@ -96,15 +97,38 @@ VAR
     Mover   : MC_MoveAbsolute;
     bEnable : BOOL;
     rTargetPos : REAL;
+    rVelocity : REAL := 50.0;
 END_VAR
 Pwr(Enable := bEnable, Axis := AxisRef);
-Mover(Execute := bEnable, Position := rTargetPos, Velocity := 50.0, Axis := AxisRef);
+Mover(Execute := bEnable, Position := rTargetPos, Velocity := rVelocity, Axis := AxisRef);
 END_PROGRAM
 """
     result = compile_st_code(code)
     assert result["status"] == "compiled"
     assert result["axis_io_map"]["start"] == AXIS_ADAPTER_IO_MAP["start"]
     assert "bEnable := AdpStart;" in result["full_source"]
+    assert result["axis_command_map"] == AXIS_ADAPTER_COMMAND_MAP
+    assert "rTargetPos := INT_TO_REAL(AdpCommandPositionX10) / 10.0;" in result["full_source"]
+    assert "rVelocity := INT_TO_REAL(AdpCommandVelocityX10) / 10.0;" in result["full_source"]
+
+
+def test_literal_absolute_target_compiles_without_interactive_command_map():
+    code = """
+PROGRAM MAIN
+VAR
+    Axis1 : AXIS_REF;
+    Mover : MC_MoveAbsolute;
+    bEnable : BOOL;
+END_VAR
+Mover(Execute := bEnable, Position := 100.0, Velocity := 50.0, Axis := Axis1);
+END_PROGRAM
+"""
+
+    result = compile_st_code(code)
+
+    assert result["status"] == "compiled"
+    assert result["axis_command_map"] is None
+    assert "AdpApplyTarget" not in result["full_source"]
 
 
 def test_initialized_benable_is_still_bridged_to_modbus_start():
@@ -149,6 +173,25 @@ END_PROGRAM
     assert "bResetReq := AdpReset;" in result["full_source"]
     assert "AdpAborted := Axis1.CommandAborted;" in result["full_source"]
     assert "AdpMoving := Axis1.Velocity <> 0.0;" in result["full_source"]
+
+
+def test_soft_limits_are_evaluated_inside_the_plc_adapter_scan():
+    code = """
+PROGRAM MAIN
+VAR
+    Axis1 : AXIS_REF;
+    Pwr : MC_Power;
+    bEnable : BOOL;
+END_VAR
+Pwr(Enable := bEnable, Axis := Axis1);
+END_PROGRAM
+"""
+    result = compile_st_code(code)
+
+    assert result["status"] == "compiled"
+    assert result["axis_io_map"]["soft_limits_enable"] == 16
+    assert "Axis1.Position >= INT_TO_REAL(AdpSoftLimitPositiveX10)" in result["full_source"]
+    assert "Axis1.Position <= INT_TO_REAL(AdpSoftLimitNegativeX10)" in result["full_source"]
 
 
 def test_chinese_comments_dont_cause_cascading_bogus_errors():

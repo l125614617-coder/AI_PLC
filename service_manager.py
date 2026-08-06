@@ -164,6 +164,13 @@ SERVICES = {
         "http://127.0.0.1:8503",
         _streamlit("app_llamacpp.py", 8503),
     ),
+    "ui_twin": Service(
+        "ui_twin",
+        "2D Digital Twin",
+        "http://127.0.0.1:8504/_stcore/health",
+        "http://127.0.0.1:8504",
+        _streamlit("twin_app.py", 8504),
+    ),
     "openplc": Service(
         "openplc",
         "OpenPLC",
@@ -183,6 +190,7 @@ MODES = {
     "codex": ("ui_codex",),
     "llamacpp": ("llamacpp", "ui_llamacpp"),
     "simulation": ("openplc",),
+    "twin": ("openplc", "ui_twin"),
     "all": tuple(SERVICES),
 }
 
@@ -306,6 +314,7 @@ class ServiceManager:
                 "ui_ollama": "app.py",
                 "ui_codex": "app_codex.py",
                 "ui_llamacpp": "app_llamacpp.py",
+                "ui_twin": "twin_app.py",
             }[key]
             if not (ROOT / entrypoint).is_file():
                 missing.append(f"UI entrypoint not found: {ROOT / entrypoint}")
