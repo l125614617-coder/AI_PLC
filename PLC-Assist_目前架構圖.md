@@ -16,10 +16,12 @@ flowchart LR
     L --> ST
 
     ST --> V[第一關：本地規則檢查<br/>語法與安全規範]
-    V --> M[第二關：matiec 真實編譯<br/>確認語法與型別正確]
-    M --> S[第三關：OpenPLC 情境測試<br/>E-Stop、限位、Reset、到位]
+    V --> C1[第二關：Motion Contract<br/>模式、速度、位置、方向]
+    C1 --> M[第三關：matiec 真實編譯<br/>確認語法與型別正確]
+    M --> R[第四關：OpenPLC Runtime<br/>部署本次生成的 ST]
+    R --> S[第五關：Modbus 情境測試<br/>E-Stop、限位、Reset、到位]
 
-    S -->|全部通過| D[部署已驗證的程式<br/>OpenPLC Runtime]
+    S -->|全部通過| D[第六關：SHA-256 身分核對<br/>部署已驗證的同一份程式]
     D <-->|Modbus TCP<br/>讀取狀態、送出命令| T[2D Digital Twin<br/>8504]
     T --> U
 
@@ -66,16 +68,16 @@ flowchart LR
 
 首先，使用者在網頁輸入運行模式、速度和位置，接著可以選擇 Ollama、Codex 或 llama.cpp 作為 AI 後端來產生程式。
 
-程式產生後不會直接執行，而是通過三道檢查。第一道是本地規則檢查，確認基本格式和安全限制；第二道使用 matiec 真實編譯，確認語法及型別正確；第三道部署到 OpenPLC，透過 Modbus 測試急停、限位、復歸和定位等實際行為。
+程式產生後不會直接執行，而是依序通過本地規則、Motion Contract、matiec 真實編譯、OpenPLC Runtime 與 Modbus 情境測試，最後再以 SHA-256 核對部署身分。
 
 只有全部測試通過，程式才能持續部署到 OpenPLC Runtime。最後，2D Digital Twin 透過 Modbus 讀取軸的位置、速度和錯誤狀態，也能送出啟動、停止、復歸及新定位命令。
 
-簡單來說，整體流程就是：**AI 幫忙寫程式，三層驗證負責把關，OpenPLC 負責執行，2D Twin 負責操作與展示。**
+簡單來說，整體流程就是：**AI 幫忙寫程式，多層驗證負責把關，OpenPLC 負責執行，2D Twin 負責操作與展示。**
 
 ## 報告時可強調的三個重點
 
 1. **支援三種 AI 後端**：可依速度、品質與本機資源彈性選擇。
-2. **生成後有三層驗證**：不把 AI 產生的程式直接交給 PLC 執行。
+2. **生成後有六道部署閘門**：不把 AI 產生的程式直接交給 PLC 執行。
 3. **驗證與展示是同一份程式**：2D Twin 操作的是實際部署到 OpenPLC 的本次 ST 程式，不是固定示範程式。
 
 > 安全提醒：目前的 E-Stop 與限位測試屬於軟體模擬，實機仍必須配置獨立的硬體安全迴路。

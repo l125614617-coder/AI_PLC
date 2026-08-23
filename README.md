@@ -4,6 +4,14 @@ PLC-Assist 是一套面向 IEC 61131-3 Structured Text（ST）的本機 AI 輔�
 
 > 核心理念：LLM 負責產生草稿，編譯器與 Runtime 測試負責建立可信邊界。生成成功不等於可部署。
 
+## 文件入口
+
+- [本機展示重建指南](DEMO_REPRODUCTION.md)：從 GitHub clone 到完整展示與驗收。
+- [Repository 與交付資料清單](REPOSITORY_MANIFEST.md)：哪些資料在 Git、哪些需外部取得。
+- [完整部署說明](DEPLOYMENT.md)：OpenPLC、matiec、服務設定與疑難排解。
+- [目前架構圖](PLC-Assist_目前架構圖.md)：系統元件、服務與資料流。
+- [版本說明](RELEASE_NOTES.md)：目前發行版本與驗證紀錄。
+
 ## 架構說明
 
 PLC-Assist 解決三個問題：
@@ -139,6 +147,7 @@ llama.cpp／Qwen3.6-27B：
 ```
 
 模型與 llama.cpp 執行檔是大型本機產物，分別放在 Git 排除的 `models/` 與 `tools/`，不包含在 Repository 中。
+完整的外部產物清單、取得方式與重建邊界請參考 [REPOSITORY_MANIFEST.md](REPOSITORY_MANIFEST.md)。
 
 ## Absolute Position 到 Twin 的操作流程
 

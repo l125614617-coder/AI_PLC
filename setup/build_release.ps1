@@ -32,11 +32,11 @@ New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 $files = @(
     "app.py", "app_codex.py", "app_llamacpp.py", "benchmark_local_models.py",
     "codex_provider.py", "compiler.py", "local_provider.py", "plc_config.py",
-    "scenarios.py", "simulator.py", "st_common.py", "validator.py",
+    "prompt_contract.py", "scenarios.py", "simulator.py", "st_common.py", "validator.py",
     "motion_contract.py",
     "twin_app.py", "twin_client.py", "twin_deployment.py", "twin_settings.py",
-    "README.md", "DEPLOYMENT.md", "RELEASE_NOTES.md",
-    "REAL_HARDWARE_CHECKLIST.md",
+    "README.md", "DEMO_REPRODUCTION.md", "DEPLOYMENT.md", "REPOSITORY_MANIFEST.md",
+    "RELEASE_NOTES.md", "REAL_HARDWARE_CHECKLIST.md", "PLC-Assist_目前架構圖.md",
     "requirements.txt", "requirements-dev.txt",
     "hardware_config.example.env"
 )
@@ -44,6 +44,14 @@ foreach ($relative in $files) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $relative) -Destination $packageDir -Force
 }
 Copy-Item -LiteralPath (Join-Path $projectRoot "motion_stubs") -Destination $packageDir -Recurse -Force
+$packageTests = Join-Path $packageDir "tests"
+New-Item -ItemType Directory -Path $packageTests -Force | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $projectRoot "tests") -File -Filter "*.py" |
+    Copy-Item -Destination $packageTests -Force
+$fixtureSource = Join-Path $projectRoot "tests\fixtures"
+if (Test-Path -LiteralPath $fixtureSource) {
+    Copy-Item -LiteralPath $fixtureSource -Destination $packageTests -Recurse -Force
+}
 New-Item -ItemType Directory -Path (Join-Path $packageDir "setup") -Force | Out-Null
 foreach ($relative in @(
     "build_release.ps1", "run_openplc.py", "setup_windows_toolchain.ps1",
@@ -79,6 +87,17 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller CLI build failed with exit code $LASTEXITCODE"
 }
+
+$manifestPath = Join-Path $packageDir "SHA256SUMS.txt"
+$manifestLines = Get-ChildItem -LiteralPath $packageDir -File -Recurse |
+    Where-Object { $_.FullName -ne $manifestPath } |
+    Sort-Object FullName |
+    ForEach-Object {
+        $relativePath = $_.FullName.Substring($packageDir.Length + 1).Replace("\", "/")
+        $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $relativePath"
+    }
+Set-Content -LiteralPath $manifestPath -Value $manifestLines -Encoding utf8
 
 $archive = Join-Path $projectRoot "release\PLC-Assist-$Version-win64.zip"
 Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $archive -Force
